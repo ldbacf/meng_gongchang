@@ -1,0 +1,50 @@
+"""全局配置，从 .env 加载"""
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ── PostgreSQL ──────────────────────────────────────────────
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+POSTGRES_USER = os.getenv("POSTGRES_USER", "mineru")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "mineru123")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "mineru_pipeline")
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    f"postgresql+asyncpg://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
+    f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}",
+)
+
+# ── Redis ──────────────────────────────────────────────────
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}")
+REDIS_QUEUE = os.getenv("REDIS_QUEUE", "mineru:poll_queue")
+
+# ── MinIO ──────────────────────────────────────────────────
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin123")
+MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
+MINIO_RAW_BUCKET = os.getenv("MINIO_RAW_BUCKET", "raw-docs")
+MINIO_PARSED_BUCKET = os.getenv("MINIO_PARSED_BUCKET", "parsed-data")
+MINIO_PUBLIC_URL = os.getenv("MINIO_PUBLIC_URL", "http://localhost:9000")
+
+# ── MinerU API ─────────────────────────────────────────────
+MINERU_API_BASE = os.getenv("MINERU_API_BASE", "https://mineru.net").rstrip("/")
+MINERU_API_TOKEN = os.getenv("MINERU_API_TOKEN", "")
+MINERU_MODEL_VERSION = os.getenv("MINERU_MODEL_VERSION", "vlm")
+MINERU_ENABLE_OCR = os.getenv("MINERU_ENABLE_OCR", "false").lower() == "true"
+MINERU_ENABLE_FORMULA = os.getenv("MINERU_ENABLE_FORMULA", "true").lower() == "true"
+MINERU_ENABLE_TABLE = os.getenv("MINERU_ENABLE_TABLE", "true").lower() == "true"
+MINERU_LANGUAGE = os.getenv("MINERU_LANGUAGE", "ch")
+
+# ── Worker ─────────────────────────────────────────────────
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))
+MAX_POLL_TIME = int(os.getenv("MAX_POLL_TIME", "1200"))
+CHUNK_SIZE = 50

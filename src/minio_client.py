@@ -1,0 +1,129 @@
+"""MinIO 双桶对象存储 — raw-docs & parsed-data"""
+
+import re
+from io import BytesIO
+
+from minio import Minio
+
+from src.config import (
+    MINIO_ACCESS_KEY,
+    MINIO_ENDPOINT,
+    MINIO_PARSED_BUCKET,
+    MINIO_PUBLIC_URL,
+    MINIO_RAW_BUCKET,
+    MINIO_SECRET_KEY,
+    MINIO_SECURE,
+)
+
+_client: Minio | None = None
+
+
+def get_minio() -> Minio:
+    global _client
+    if _client is None:
+        _client = Minio(
+            MINIO_ENDPOINT,
+            access_key=MINIO_ACCESS_KEY,
+            secret_key=MINIO_SECRET_KEY,
+            secure=MINIO_SECURE,
+        )
+    return _client
+
+
+async def init_buckets():
+    """确保 raw-docs 和 parsed-data 两个桶存在"""
+    client = get_minio()
+    for bucket in (MINIO_RAW_BUCKET, MINIO_PARSED_BUCKET):
+        found = client.bucket_exists(bucket)
+        if not found:
+            client.make_bucket(bucket)
+            print(f"[MinIO] 创建桶: {bucket}")
+        else:
+            print(f"[MinIO] 桶已存在: {bucket}")
+
+
+def upload_raw_pdf(md5: str, filename: str, data: bytes) -> str:
+    """上传原始 PDF 到 raw-docs/{md5}/"""
+    client = get_minio()
+    path = f"{md5}/{filename}"
+    client.put_object(
+        MINIO_RAW_BUCKET, path, BytesIO(data), length=len(data),
+        content_type="application/pdf",
+    )
+    return path
+
+
+def upload_parsed_assets(md5: str, zip_bytes: bytes) -> str:
+    """
+    上传解析产物到 parsed-data/{md5}/。
+    对 full.md 做图片路径替换后将所有资产写入 MinIO。
+    返回 full.md 的 MinIO URL。
+    """
+    import zipfile
+
+    client = get_minio()
+    prefix = f"{md5}/"
+    images_dir = f"{md5}/images/"
+    full_md_content = None
+
+    with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+        for member in zf.namelist():
+            member_name = member.rstrip("/")
+            if member_name.endswith("/") or not member_name:
+                continue
+
+            file_bytes = zf.read(member)
+            base_name = member_name.rsplit("/", 1)[-1] if "/" in member_name else member_name
+
+            if base_name == "full.md" or member_name.endswith("/full.md"):
+                full_md_content = file_bytes
+            elif base_name.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")):
+                img_path = f"{images_dir}{base_name}"
+                ct = _content_type(base_name)
+                client.put_object(
+                    MINIO_PARSED_BUCKET, img_path, BytesIO(file_bytes),
+                    length=len(file_bytes), content_type=ct,
+                )
+            else:
+                obj_path = f"{prefix}{base_name}"
+                client.put_object(
+                    MINIO_PARSED_BUCKET, obj_path, BytesIO(file_bytes),
+                    length=len(file_bytes),
+                )
+
+    # 图片路径替换
+    if full_md_content:
+        md_text = full_md_content.decode("utf-8", errors="replace")
+        public_prefix = f"{MINIO_PUBLIC_URL}/{MINIO_PARSED_BUCKET}/{md5}"
+        md_text = re.sub(
+            r"!\[([^\]]*)\]\(images/([^)]+)\)",
+            rf"![\1]({public_prefix}/images/\2)",
+            md_text,
+        )
+        md_path = f"{prefix}full.md"
+        md_bytes = md_text.encode("utf-8")
+        client.put_object(
+            MINIO_PARSED_BUCKET, md_path, BytesIO(md_bytes),
+            length=len(md_bytes), content_type="text/markdown",
+        )
+
+    return f"{MINIO_PUBLIC_URL}/{MINIO_PARSED_BUCKET}/{prefix}full.md"
+
+
+def _content_type(filename: str) -> str:
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return {
+        "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "png": "image/png", "webp": "image/webp",
+        "gif": "image/gif", "bmp": "image/bmp",
+    }.get(ext, "application/octet-stream")
+
+
+def check_parsed_exists(md5: str) -> bool:
+    """验证 parsed-data/{md5}/ 下是否存在核心产物 full.md"""
+    client = get_minio()
+    try:
+        client.stat_object(MINIO_PARSED_BUCKET, f"{md5}/full.md")
+        return True
+    except Exception:
+        return False
