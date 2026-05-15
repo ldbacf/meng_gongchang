@@ -1,0 +1,135 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-slate-200;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
+}
+
+@layer components {
+  /* Markdown rendered content styles */
+  .markdown-body h1 {
+    @apply text-2xl font-bold mb-4 mt-6;
+  }
+
+  .markdown-body h2 {
+    @apply text-xl font-semibold mb-3 mt-5;
+  }
+
+  .markdown-body h3 {
+    @apply text-lg font-semibold mb-2 mt-4;
+  }
+
+  .markdown-body p {
+    @apply mb-3 leading-relaxed;
+  }
+
+  .markdown-body ul,
+  .markdown-body ol {
+    @apply mb-3 pl-6;
+  }
+
+  .markdown-body ul {
+    @apply list-disc;
+  }
+
+  .markdown-body ol {
+    @apply list-decimal;
+  }
+
+  .markdown-body li {
+    @apply mb-1;
+  }
+
+  .markdown-body code {
+    @apply bg-slate-100 text-primary-700 px-1.5 py-0.5 rounded text-sm font-mono;
+  }
+
+  .markdown-body pre {
+    @apply my-4 rounded-xl overflow-hidden;
+  }
+
+  .markdown-body pre code {
+    @apply bg-transparent text-slate-100 p-4 block text-sm leading-relaxed;
+  }
+
+  .markdown-body blockquote {
+    @apply border-l-4 border-primary-400 pl-4 py-2 my-3 bg-primary-50/50 rounded-r-lg italic text-slate-600;
+  }
+
+  .markdown-body table {
+    @apply w-full border-collapse my-4;
+  }
+
+  .markdown-body th {
+    @apply bg-slate-100 text-left px-4 py-2 font-semibold border-b-2 border-slate-200;
+  }
+
+  .markdown-body td {
+    @apply px-4 py-2 border-b border-slate-100;
+  }
+
+  .markdown-body a {
+    @apply text-primary-600 underline hover:text-primary-700;
+  }
+
+  .markdown-body hr {
+    @apply my-6 border-slate-200;
+  }
+
+  .markdown-body strong {
+    @apply font-semibold text-slate-900;
+  }
+}
+
+/* Transition classes */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.slide-enter-from {
+  transform: translateX(-20px);
+  opacity: 0;
+}
+
+.slide-leave-to {
+  transform: translateX(-20px);
+  opacity: 0;
+}

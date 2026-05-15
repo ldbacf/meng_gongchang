@@ -1,0 +1,53 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import { Send } from 'lucide-vue-next'
+
+const text = ref('')
+const emit = defineEmits<{ send: [content: string] }>()
+
+defineProps<{ disabled?: boolean }>()
+
+function handleSend() {
+  const content = text.value.trim()
+  if (!content) return
+  emit('send', content)
+  text.value = ''
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    handleSend()
+  }
+}
+</script>
+
+<template>
+  <div class="border-t bg-white/80 backdrop-blur-xl px-4 py-4">
+    <div class="mx-auto max-w-3xl">
+      <div
+        class="flex items-end gap-3 rounded-2xl border bg-slate-50 px-4 py-3 transition-all duration-200 focus-within:border-primary-400 focus-within:bg-white focus-within:shadow-md"
+      >
+        <textarea
+          v-model="text"
+          :disabled="disabled"
+          rows="1"
+          placeholder="输入您的医学问题..."
+          class="max-h-36 min-h-[24px] flex-1 resize-none bg-transparent text-sm text-slate-900 placeholder-slate-400 outline-none disabled:opacity-50"
+          @keydown="handleKeydown"
+          @input="() => {}"
+        />
+        <button
+          :disabled="disabled || !text.trim()"
+          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-600 text-white transition-all hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          @click="handleSend"
+        >
+          <Send :size="16" />
+        </button>
+      </div>
+      <p class="mt-2 text-center text-xs text-slate-400">
+        MedRAG 可能产生不准确信息，请核对引文来源。Enter 发送，Shift+Enter 换行。
+      </p>
+    </div>
+  </div>
+</template>
