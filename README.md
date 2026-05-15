@@ -43,3 +43,19 @@ uv run scrape_articles.py
 - `articles/pdf/` — 对应的 PDF 文件
 
 支持断点续爬，中断后重新运行会自动跳过已完成的文章。
+
+### 4. 检查 JSON 和 PDF 是否对应
+
+```bash
+uv run check_files.py
+```
+
+列出缺少 PDF 的条目，并匹配回原始文章链接。
+
+### 5. 补抓缺失的 PDF
+
+```bash
+uv run rescrape_missing.py
+```
+
+对缺失 PDF 的条目重新抓取文章信息并下载 PDF。

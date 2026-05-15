@@ -210,6 +210,7 @@ def scrape_article(url):
             result["abstract_en"] = ""
 
     result["article_id"] = get_article_id(text)
+    result["source_url"] = url
 
     return result
 
