@@ -16,10 +16,14 @@ async def get_redis() -> aioredis.Redis:
     return aioredis.Redis(connection_pool=_pool)
 
 
-async def enqueue_batch(batch_id: str, md5_list: list[str]) -> None:
-    """将 batch_id 推入轮询队列"""
+async def enqueue_batch(batch_id: str, md5_list: list[str], token: str) -> None:
+    """将 batch_id + token 推入轮询队列"""
     r = await get_redis()
-    payload = json.dumps({"batch_id": batch_id, "md5_list": md5_list})
+    payload = json.dumps({
+        "batch_id": batch_id,
+        "md5_list": md5_list,
+        "token": token,
+    })
     await r.lpush(REDIS_QUEUE, payload)
 
 

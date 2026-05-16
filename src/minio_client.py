@@ -1,4 +1,4 @@
-"""MinIO 双桶对象存储 — raw-docs & parsed-data"""
+"""MinIO 三桶对象存储 — raw-docs / doc-meta / parsed-data"""
 
 import re
 from io import BytesIO
@@ -8,6 +8,7 @@ from minio import Minio
 from src.config import (
     MINIO_ACCESS_KEY,
     MINIO_ENDPOINT,
+    MINIO_META_BUCKET,
     MINIO_PARSED_BUCKET,
     MINIO_PUBLIC_URL,
     MINIO_RAW_BUCKET,
@@ -31,9 +32,9 @@ def get_minio() -> Minio:
 
 
 async def init_buckets():
-    """确保 raw-docs 和 parsed-data 两个桶存在"""
+    """确保三桶存在"""
     client = get_minio()
-    for bucket in (MINIO_RAW_BUCKET, MINIO_PARSED_BUCKET):
+    for bucket in (MINIO_RAW_BUCKET, MINIO_META_BUCKET, MINIO_PARSED_BUCKET):
         found = client.bucket_exists(bucket)
         if not found:
             client.make_bucket(bucket)
@@ -49,6 +50,17 @@ def upload_raw_pdf(md5: str, filename: str, data: bytes) -> str:
     client.put_object(
         MINIO_RAW_BUCKET, path, BytesIO(data), length=len(data),
         content_type="application/pdf",
+    )
+    return path
+
+
+def upload_meta_json(md5: str, filename: str, data: bytes) -> str:
+    """上传元信息 JSON 到 doc-meta/{md5}/{filename}"""
+    client = get_minio()
+    path = f"{md5}/{filename}"
+    client.put_object(
+        MINIO_META_BUCKET, path, BytesIO(data), length=len(data),
+        content_type="application/json",
     )
     return path
 
@@ -91,7 +103,6 @@ def upload_parsed_assets(md5: str, zip_bytes: bytes) -> str:
                     length=len(file_bytes),
                 )
 
-    # 图片路径替换
     if full_md_content:
         md_text = full_md_content.decode("utf-8", errors="replace")
         public_prefix = f"{MINIO_PUBLIC_URL}/{MINIO_PARSED_BUCKET}/{md5}"

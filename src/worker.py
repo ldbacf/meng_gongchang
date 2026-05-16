@@ -1,4 +1,4 @@
-"""后台 Worker — 轮询 Redis 队列，追踪 MinerU 任务状态，完成时解包存入 MinIO"""
+"""后台 Worker — 多 Token 支持"""
 
 import asyncio
 import signal
@@ -23,9 +23,9 @@ STATE_LABELS = {
 }
 
 
-async def _process_one_batch(batch_id: str, md5_list: list[str]):
-    """处理一个 batch: 轮询 → 下载 → 解包入库"""
-    print(f"[Worker] 开始轮询 batch_id={batch_id} md5s={md5_list}")
+async def _process_one_batch(batch_id: str, md5_list: list[str], token: str):
+    """使用指定 token 轮询"""
+    print(f"[Worker] 轮询 batch_id={batch_id} token={token[:8]}...")
     start = time.time()
     pending = set(md5_list)
 
@@ -34,9 +34,24 @@ async def _process_one_batch(batch_id: str, md5_list: list[str]):
         elapsed = time.time() - start
 
         try:
-            items = await poll_batch(batch_id)
+            items = await poll_batch(batch_id, token=token)
         except Exception as e:
-            print(f"[Worker] 查询 batch 失败 ({elapsed:.0f}s): {e}")
+            err_msg = str(e)
+            print(f"[Worker] 查询失败 ({elapsed:.0f}s): {err_msg}")
+
+            # 致命错误: batch 不存在 / token 失效 → 直接标记失败
+            if any(kw in err_msg for kw in ("找不到任务", "没有权限", "Token 错误", "Token 过期")):
+                print(f"[Worker] batch 不可恢复, 直接标记失败")
+                for md5 in pending:
+                    async with async_session() as session:
+                        stmt = select(DocumentTask).where(DocumentTask.md5 == md5)
+                        r = await session.execute(stmt)
+                        t = r.scalar_one_or_none()
+                        if t:
+                            t.status = TaskStatus.FAILED
+                            t.error_msg = err_msg
+                        await session.commit()
+                return
             continue
 
         for item in items:
@@ -53,7 +68,7 @@ async def _process_one_batch(batch_id: str, md5_list: list[str]):
                 try:
                     zip_bytes = await download_result(item["full_zip_url"])
                     md_url = upload_parsed_assets(md5, zip_bytes)
-                    print(f"[Worker] {fname}: 解析结果已存入 MinIO -> {md_url}")
+                    print(f"[Worker] {fname}: 已存入 MinIO -> {md_url}")
 
                     async with async_session() as session:
                         stmt = select(DocumentTask).where(DocumentTask.md5 == md5)
@@ -88,9 +103,8 @@ async def _process_one_batch(batch_id: str, md5_list: list[str]):
                         await session.commit()
                 pending.discard(md5)
 
-    # 超时
     for md5 in pending:
-        print(f"[Worker] {md5}: 超时未完成")
+        print(f"[Worker] {md5}: 超时")
         async with async_session() as session:
             stmt = select(DocumentTask).where(DocumentTask.md5 == md5)
             result = await session.execute(stmt)
@@ -102,7 +116,6 @@ async def _process_one_batch(batch_id: str, md5_list: list[str]):
 
 
 async def run_worker():
-    """Worker 主循环 — 监听 Redis 队列"""
     print("[Worker] 启动，等待任务...")
     stop = False
 
@@ -119,7 +132,11 @@ async def run_worker():
             job = await dequeue_batch(timeout=5)
             if job is None:
                 continue
-            await _process_one_batch(job["batch_id"], job["md5_list"])
+            await _process_one_batch(
+                job["batch_id"],
+                job["md5_list"],
+                job.get("token", ""),
+            )
         except Exception as e:
             print(f"[Worker] 异常: {e}")
             await asyncio.sleep(5)

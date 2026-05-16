@@ -28,6 +28,7 @@ class DocumentTask(Base):
     md5: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
     original_name: Mapped[str] = mapped_column(String(512), nullable=False)
     raw_minio_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    meta_minio_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     parsed_minio_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     status: Mapped[str] = mapped_column(
         String(32), default=TaskStatus.PENDING, nullable=False, index=True

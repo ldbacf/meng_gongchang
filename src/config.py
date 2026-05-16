@@ -32,17 +32,25 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin123")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
 MINIO_RAW_BUCKET = os.getenv("MINIO_RAW_BUCKET", "raw-docs")
+MINIO_META_BUCKET = os.getenv("MINIO_META_BUCKET", "doc-meta")
 MINIO_PARSED_BUCKET = os.getenv("MINIO_PARSED_BUCKET", "parsed-data")
 MINIO_PUBLIC_URL = os.getenv("MINIO_PUBLIC_URL", "http://localhost:9000")
 
 # ── MinerU API ─────────────────────────────────────────────
 MINERU_API_BASE = os.getenv("MINERU_API_BASE", "https://mineru.net").rstrip("/")
+# 兼容旧版: 只用 MINERU_API_TOKEN 也可
 MINERU_API_TOKEN = os.getenv("MINERU_API_TOKEN", "")
+MINERU_TOKENS_RAW = (
+    os.getenv("MINERU_TOKENS")
+    or (MINERU_API_TOKEN if MINERU_API_TOKEN else "")
+)
 MINERU_MODEL_VERSION = os.getenv("MINERU_MODEL_VERSION", "vlm")
 MINERU_ENABLE_OCR = os.getenv("MINERU_ENABLE_OCR", "false").lower() == "true"
 MINERU_ENABLE_FORMULA = os.getenv("MINERU_ENABLE_FORMULA", "true").lower() == "true"
 MINERU_ENABLE_TABLE = os.getenv("MINERU_ENABLE_TABLE", "true").lower() == "true"
 MINERU_LANGUAGE = os.getenv("MINERU_LANGUAGE", "ch")
+MINERU_MAX_PAGES_PER_KEY = int(os.getenv("MINERU_MAX_PAGES_PER_KEY", "1000"))
+MINERU_BATCH_SIZE = int(os.getenv("MINERU_BATCH_SIZE", "10"))
 
 # ── Worker ─────────────────────────────────────────────────
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))

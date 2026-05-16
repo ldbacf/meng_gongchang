@@ -31,7 +31,7 @@ ENABLE_FORMULA = os.getenv("ENABLE_FORMULA", "true").lower() == "true"
 ENABLE_TABLE = os.getenv("ENABLE_TABLE", "true").lower() == "true"
 LANGUAGE = os.getenv("LANGUAGE", "ch")
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
 PDF_INPUT_DIR = Path(os.getenv("PDF_INPUT_DIR", SCRIPT_DIR / "after"))
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", SCRIPT_DIR / "ok"))
 

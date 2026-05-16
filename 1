@@ -1,0 +1,28 @@
+终端 1 — 启动基础设施
+                                                                                           
+  source D:/anaconda/Scripts/activate rag_test
+  cd /d/aaa_garbages/shangke/project/test                                                  
+  docker compose up -d
+
+  终端 2 — 启动 API
+
+  source D:/anaconda/Scripts/activate rag_test
+  cd /d/aaa_garbages/shangke/project/test
+  uv run uvicorn src.main:app --reload --port 8000
+
+  终端 3 — 启动 Worker
+
+  source D:/anaconda/Scripts/activate rag_test
+  cd /d/aaa_garbages/shangke/project/test
+  uv run python -m src.worker
+
+  都起来之后，终端 4 跑测试：
+
+  source D:/anaconda/Scripts/activate rag_test
+  cd /d/aaa_garbages/shangke/project/test
+  uv run python test_pipeline.py --batch
+
+
+
+每日操作
+  uv run python scripts/scan_submit.py --dir D:\aaa_garbages\shangke\pachong\meng_gongchang\articles

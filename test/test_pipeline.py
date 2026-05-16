@@ -13,14 +13,19 @@
 
 import asyncio
 import hashlib
+import os
 import time
 from argparse import ArgumentParser
 from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv()
 
 API = "http://localhost:8000"
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
+PDF_INPUT_DIR = Path(os.getenv("PDF_INPUT_DIR", str(SCRIPT_DIR / "after")))
 
 # 颜色输出 (兼容 Windows cmd)
 GREEN = "\033[92m"
@@ -143,9 +148,9 @@ async def test_upload_batch(pdf_paths: list[Path]):
 async def main():
     parser = ArgumentParser(description="阶段一管线测试")
     parser.add_argument("--file", "-f", type=str, default=None,
-                        help="指定单个 PDF 文件路径 (默认测试 after/ 下第一个)")
+                        help=f"指定单个 PDF 文件路径 (默认取 {PDF_INPUT_DIR} 下第一个)")
     parser.add_argument("--batch", "-b", action="store_true",
-                        help="批量测试 after/ 下所有 PDF")
+                        help=f"批量测试 {PDF_INPUT_DIR} 下所有 PDF")
     args = parser.parse_args()
 
     print(f"\n{'=' * 60}")
@@ -161,7 +166,7 @@ async def main():
     hr()
 
     if args.batch:
-        pdfs = sorted((SCRIPT_DIR / "after").glob("*.pdf"))
+        pdfs = sorted((PDF_INPUT_DIR).glob("*.pdf"))
         if not pdfs:
             fail("after/ 下无 PDF 文件")
             return
@@ -172,7 +177,7 @@ async def main():
             if not file_path.is_absolute():
                 file_path = SCRIPT_DIR / file_path
         else:
-            pdfs = sorted((SCRIPT_DIR / "after").glob("*.pdf"))
+            pdfs = sorted((PDF_INPUT_DIR).glob("*.pdf"))
             if not pdfs:
                 fail("after/ 下无 PDF 文件，请用 --file 指定")
                 return
