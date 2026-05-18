@@ -34,6 +34,7 @@ MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
 MINIO_RAW_BUCKET = os.getenv("MINIO_RAW_BUCKET", "raw-docs")
 MINIO_META_BUCKET = os.getenv("MINIO_META_BUCKET", "doc-meta")
 MINIO_PARSED_BUCKET = os.getenv("MINIO_PARSED_BUCKET", "parsed-data")
+MINIO_CHUNKS_BUCKET = os.getenv("MINIO_CHUNKS_BUCKET", "chunks")
 MINIO_PUBLIC_URL = os.getenv("MINIO_PUBLIC_URL", "http://localhost:9000")
 
 # ── MinerU API ─────────────────────────────────────────────

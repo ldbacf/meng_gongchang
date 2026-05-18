@@ -7,6 +7,7 @@ from minio import Minio
 
 from src.config import (
     MINIO_ACCESS_KEY,
+    MINIO_CHUNKS_BUCKET,
     MINIO_ENDPOINT,
     MINIO_META_BUCKET,
     MINIO_PARSED_BUCKET,
@@ -34,7 +35,7 @@ def get_minio() -> Minio:
 async def init_buckets():
     """确保三桶存在"""
     client = get_minio()
-    for bucket in (MINIO_RAW_BUCKET, MINIO_META_BUCKET, MINIO_PARSED_BUCKET):
+    for bucket in (MINIO_RAW_BUCKET, MINIO_META_BUCKET, MINIO_PARSED_BUCKET, MINIO_CHUNKS_BUCKET):
         found = client.bucket_exists(bucket)
         if not found:
             client.make_bucket(bucket)
@@ -135,6 +136,35 @@ def check_parsed_exists(md5: str) -> bool:
     client = get_minio()
     try:
         client.stat_object(MINIO_PARSED_BUCKET, f"{md5}/full.md")
+        return True
+    except Exception:
+        return False
+
+
+def upload_chunk_json(uuid: str, data: bytes) -> str:
+    """上传切分结果 JSON 到 chunks/{uuid}.json（桶不存在则自动创建）"""
+    client = get_minio()
+    _ensure_bucket(MINIO_CHUNKS_BUCKET)
+    path = f"{uuid}.json"
+    client.put_object(
+        MINIO_CHUNKS_BUCKET, path, BytesIO(data), length=len(data),
+        content_type="application/json",
+    )
+    return path
+
+
+def _ensure_bucket(bucket: str):
+    """同步检查并创建桶"""
+    client = get_minio()
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+
+
+def chunk_json_exists(uuid: str) -> bool:
+    """检查 chunks/{uuid}.json 是否已存在"""
+    client = get_minio()
+    try:
+        client.stat_object(MINIO_CHUNKS_BUCKET, f"{uuid}.json")
         return True
     except Exception:
         return False

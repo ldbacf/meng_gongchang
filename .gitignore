@@ -1,27 +1,12 @@
-# Python
+.env
 __pycache__/
 *.pyc
-*.pyo
 .venv/
-.pytest_cache/
+ok/*
+!ok/.gitkeep
 *.egg-info/
 dist/
-
-# Env
-.env
-
-# Data & Logs
+.pytest_cache/
 data/
+chunks/
 log/
-ok/
-after/
-
-# IDE & OS
-.vscode/
-.idea/
-*.swp
-.DS_Store
-Thumbs.db
-
-# Project
-CLAUDE.md
