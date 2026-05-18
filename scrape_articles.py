@@ -14,6 +14,7 @@ import json
 import re
 import time
 import random
+import hashlib
 from lxml import html
 from pathlib import Path
 from tqdm import tqdm
@@ -215,15 +216,32 @@ def scrape_article(url):
     return result
 
 
+LINKS_PATH = Path("article_links.txt")
+
+
+def _links_fingerprint():
+    """返回 article_links.txt 内容的简短指纹。"""
+    if not LINKS_PATH.exists():
+        return ""
+    h = hashlib.md5(LINKS_PATH.read_bytes()).hexdigest()[:12]
+    return h
+
+
 def read_progress():
     if PROGRESS_PATH.exists():
-        with open(PROGRESS_PATH) as f:
-            return int(f.read().strip())
+        raw = PROGRESS_PATH.read_text().strip()
+        if ":" in raw:
+            fp, idx = raw.split(":", 1)
+            if fp != _links_fingerprint():
+                print("检测到 article_links.txt 内容已变化，自动重置进度。")
+                return 0
+            return int(idx)
+        return int(raw)
     return 0
 
 
 def write_progress(n):
-    PROGRESS_PATH.write_text(str(n))
+    PROGRESS_PATH.write_text(f"{_links_fingerprint()}:{n}")
 
 
 def main():

@@ -44,7 +44,9 @@ uv run scrape_articles.py
 - `articles/json/` — 每篇文章一个 JSON 文件
 - `articles/pdf/` — 对应的 PDF 文件
 
-支持断点续爬，中断后重新运行会自动跳过已完成的文章。
+**断点续爬**：进度保存在 `articles/_progress.txt`（含文件指纹）。中断后重新运行会自动继续。若 `article_links.txt` 内容发生变化（例如重新跑了前两步），指纹不匹配，进度自动重置。
+
+**PDF 去重**：已下载的 PDF 不会重复下载。
 
 ### 4. 检查 JSON 和 PDF 是否对应
 
