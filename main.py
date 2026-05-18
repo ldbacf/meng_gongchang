@@ -32,6 +32,9 @@ def get_volumn_links(year="2025"):
 if __name__ == "__main__":
     year = sys.argv[1] if len(sys.argv) > 1 else "2025"
     volumns = get_volumn_links(year)
-    print(f"共找到 {len(volumns)} 个卷期链接（{year}年）\n")
-    for i, url in enumerate(volumns, 1):
-        print(f"[{i:3d}] {url}")
+
+    # 写入 11.txt
+    with open("11.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(volumns))
+
+    print(f"共找到 {len(volumns)} 个卷期链接（{year}年），已写入 11.txt")
