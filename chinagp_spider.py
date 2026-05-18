@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+
+#使用方法
+#cd 脚本所在目录
+#python chinagp_spider.py
+#使用前需下载pip install requests beautifulsoup4两个第三方库，用于网站请求与解析
+
+
 """
 中国全科医学 (Chinese General Practice) 爬虫脚本
 爬取 2024-2025 年期刊文章元数据（JSON）及 PDF 文件
