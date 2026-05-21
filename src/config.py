@@ -53,6 +53,18 @@ MINERU_LANGUAGE = os.getenv("MINERU_LANGUAGE", "ch")
 MINERU_MAX_PAGES_PER_KEY = int(os.getenv("MINERU_MAX_PAGES_PER_KEY", "1000"))
 MINERU_BATCH_SIZE = int(os.getenv("MINERU_BATCH_SIZE", "10"))
 
+# ── Elasticsearch ─────────────────────────────────────────
+ES_HOST = os.getenv("ES_HOST", "localhost")
+ES_PORT = int(os.getenv("ES_PORT", "9200"))
+ES_USER = os.getenv("ES_USER", "")
+ES_PASSWORD = os.getenv("ES_PASSWORD", "")
+ES_INDEX = os.getenv("ES_INDEX", "chunks")
+
+# ── Milvus ────────────────────────────────────────────────
+MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
+MILVUS_PORT = int(os.getenv("MILVUS_PORT", "19530"))
+MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "chunks")
+
 # ── Worker ─────────────────────────────────────────────────
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))
 MAX_POLL_TIME = int(os.getenv("MAX_POLL_TIME", "1200"))

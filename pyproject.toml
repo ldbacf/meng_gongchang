@@ -15,6 +15,11 @@ dependencies = [
     "python-multipart>=0.0.20",
     "PyMuPDF>=1.24.0",
     "tqdm>=4.66.0",
+    "elasticsearch>=8.19.0,<9",
+    "pymilvus>=2.4.15",
+    "sentence-transformers>=3.0.0",
+    "modelscope>=1.37.0",
+    "torch>=2.6.0",
 ]
 
 [build-system]
@@ -27,3 +32,11 @@ packages = ["src"]
 [project.scripts]
 pipeline-api = "src.main:app"
 pipeline-worker = "src.worker:run_worker"
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
