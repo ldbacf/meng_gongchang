@@ -21,6 +21,9 @@ from src.config import (
     MILVUS_HOST,
     MILVUS_PORT,
     MILVUS_COLLECTION,
+    SILICONFLOW_API_KEY,
+    SILICONFLOW_BASE_URL,
+    SILICONFLOW_RERANK_MODEL,
 )
 
 
@@ -35,6 +38,7 @@ class SearchHit:
     content: str = ""
     html_body: str = ""
     score_rrf: float = 0.0
+    score_rerank: float = 0.0
     score_milvus: float = 0.0
     score_es: float = 0.0
     rank_milvus: int = 999999
@@ -236,11 +240,13 @@ def _get_embed_model():
     global _EMBED_MODEL
     if _EMBED_MODEL is None:
         import os
-        # 清除无效 SSL_CERT_FILE 避免 huggingface_hub 加载失败
         if "SSL_CERT_FILE" in os.environ and not os.path.exists(os.environ["SSL_CERT_FILE"]):
             os.environ.pop("SSL_CERT_FILE", None)
         from sentence_transformers import SentenceTransformer
-        _EMBED_MODEL = SentenceTransformer("BAAI/bge-m3")
+        local = os.path.join(os.path.dirname(__file__), "..", "models", "bge-m3")
+        local = os.path.abspath(local)
+        model_id = local if os.path.isdir(local) else "BAAI/bge-m3"
+        _EMBED_MODEL = SentenceTransformer(model_id)
     return _EMBED_MODEL
 
 
@@ -274,33 +280,92 @@ def search(
     return results
 
 
+def search_with_intent(
+    query: str,
+    filters: dict | None = None,
+    top_k: int = 20,
+    milvus_top_k: int = 200,
+    es_top_k: int = 200,
+) -> tuple[list[SearchHit], "IntentResult"]:
+    """
+    意图识别 + 双路召回 + RRF 融合。
+
+    先调用 DeepSeek-V4-Flash 分析 query 意图并重写，
+    再用重写后的 query 做检索，最终返回 (hits, intent)。
+    意图识别失败时降级为原始 query 直搜。
+
+    返回:
+        (list[SearchHit], IntentResult)
+    """
+    from src.query_intent import analyze_intent, IntentResult
+
+    intent = analyze_intent(query)
+    search_query = intent.rewritten_query or query
+
+    hits = search(search_query, filters=filters, top_k=top_k, milvus_top_k=milvus_top_k, es_top_k=es_top_k)
+    return hits, intent
+
+
 def rerank(
     query: str,
     docs: list[SearchHit],
-    model=None,
+    top_n: int | None = None,
 ) -> list[SearchHit]:
     """
-    精排 — 对 search 输出的结果用 cross-encoder 重排序。
+    精排 — 调用硅基流动 Qwen3-Reranker API 重排序。
 
     参数:
         query: 原始查询
         docs: search 返回的结果列表
-        model: reranker 模型实例，需有 model.predict([(q,d)]*n) → list[float] 接口
-               （如 BAAI/bge-reranker-v2-m3、cross-encoder/ms-marco-MiniLM 等）
+        top_n: 返回前 N 条，默认全部返回
 
     返回:
-        按 score_rerank 降序排列
+        按 score_rerank 降序排列，无 content 的 chunk 保持原序排在末尾
     """
-    if model is None:
-        # 无 reranker 时保持原序
+    if not docs:
         return docs
 
-    pairs = [(query, d.content) for d in docs if d.content]
-    try:
-        scores = model.predict(pairs)
-        for i, d in enumerate([d for d in docs if d.content]):
-            d.score_rrf = float(scores[i])  # 复用 score_rrf 字段存 rerank 分
-    except Exception:
-        pass
+    # 分离有 content 和无 content 的文档
+    with_content = [d for d in docs if d.content]
+    without_content = [d for d in docs if not d.content]
 
-    return sorted(docs, key=lambda x: x.score_rrf, reverse=True)
+    if not with_content or not SILICONFLOW_API_KEY:
+        return docs
+
+    import httpx
+
+    documents = [d.content for d in with_content]
+    payload = {
+        "model": SILICONFLOW_RERANK_MODEL,
+        "query": query,
+        "documents": documents,
+        "return_documents": False,
+    }
+
+    try:
+        resp = httpx.post(
+            f"{SILICONFLOW_BASE_URL}/rerank",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return docs
+
+    # 写入 rerank 分数
+    for item in data.get("results", []):
+        idx = item["index"]
+        with_content[idx].score_rerank = item["relevance_score"]
+
+    # 有 rerank 分的按分降序，无分的保持原序
+    reranked = sorted(with_content, key=lambda x: x.score_rerank, reverse=True)
+
+    if top_n:
+        reranked = reranked[:top_n]
+
+    return reranked + without_content
