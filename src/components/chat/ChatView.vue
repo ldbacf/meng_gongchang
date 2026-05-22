@@ -7,7 +7,6 @@ import { fetchDocumentPdfApi } from '@/api/document'
 import ChatInput from './ChatInput.vue'
 import MessageBubble from './MessageBubble.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import CitationSummary from './CitationSummary.vue'
 import RightPanel from './RightPanel.vue'
 import { Sparkles } from 'lucide-vue-next'
 
@@ -37,6 +36,7 @@ const rightPanelOpen = ref(false)
 const activeCitation = ref<Citation | null>(null)
 const pdfUrl = ref<string | null>(null)
 const pdfLoading = ref(false)
+const showBackButton = ref(false)
 
 const uniqueCitations = computed(() => {
   const map = new Map<string, Citation>()
@@ -50,7 +50,7 @@ const uniqueCitations = computed(() => {
   return Array.from(map.values())
 })
 
-async function handleCitationClick(citationId: string) {
+async function loadPdfForCitation(citationId: string) {
   const citation = uniqueCitations.value.find((c) => c.id === citationId)
   if (!citation) return
 
@@ -60,7 +60,6 @@ async function handleCitationClick(citationId: string) {
   pdfUrl.value = null
 
   try {
-    // Determine docId from citation: citation 101 → doc-001, 102 → doc-002, 103 → doc-003
     const docNum = parseInt(citationId, 10)
     const docId = isNaN(docNum) ? null : `doc-${String(docNum - 100).padStart(3, '0')}`
     if (docId) {
@@ -68,14 +67,19 @@ async function handleCitationClick(citationId: string) {
       pdfUrl.value = res.pdfUrl
     }
   } catch {
-    // Fallback: use citation's built-in pdfUrl if API fails
     pdfUrl.value = citation.pdfUrl ?? null
   } finally {
     pdfLoading.value = false
   }
 }
 
+async function handleCitationClick(citationId: string) {
+  showBackButton.value = false
+  await loadPdfForCitation(citationId)
+}
+
 function showCitationList() {
+  showBackButton.value = true
   activeCitation.value = null
   pdfUrl.value = null
   rightPanelOpen.value = true
@@ -93,7 +97,8 @@ function goBackToList() {
 }
 
 function handlePanelSelectCitation(citation: Citation) {
-  handleCitationClick(citation.id)
+  showBackButton.value = true
+  loadPdfForCitation(citation.id)
 }
 
 // ── Mock pipeline ──
@@ -139,7 +144,7 @@ const scenarioConfigs: Record<Scenario, ScenarioConfig> = {
         snippet:
           '基层全科医生可利用 China-PAR 模型、Framingham 风险评分等工具进行个体化心血管风险评估。风险沟通分为四步：风险评估、信息传递、行为干预和治疗决策。',
         page: 23,
-        pdfUrl: '/pdf/基层全科医生心血管疾病风险评估与沟通策略.pdf',
+        pdfUrl: '/api/pdf/1',
       },
     ],
   },
@@ -159,7 +164,7 @@ const scenarioConfigs: Record<Scenario, ScenarioConfig> = {
         snippet:
           '研究显示，COPD 合并高血压患者的第1秒用力呼气容积占预计值百分比 (FEV1%pred) 与收缩压标准差 (SDSBP) 呈负线性相关。FEV1%pred 越低，血压变异性越高。',
         page: 56,
-        pdfUrl: '/pdf/慢性阻塞性肺疾病合并高血压患者肺功能与血压变异性的相关研究.pdf',
+        pdfUrl: '/api/pdf/2',
       },
     ],
   },
@@ -179,7 +184,7 @@ const scenarioConfigs: Record<Scenario, ScenarioConfig> = {
         snippet:
           '目前我国基层卫生评价指标主要聚焦于6类核心方向，其中以"绩效评价"为研究主题的文献数量最多（占36.9%），多采用文献分析法和德尔菲法构建指标体系。',
         page: 12,
-        pdfUrl: '/pdf/我国基层卫生服务与管理评价指标体系研究进展.pdf',
+        pdfUrl: '/api/pdf/3',
       },
     ],
   },
@@ -216,30 +221,34 @@ function runMockPipeline(userMessage: string) {
   const scenario = detectScenario(userMessage)
   const config = scenarioConfigs[scenario]
 
+  // Step 1: intent starts immediately
   mockRagSteps.intent = { status: 'pending', title: '意图识别' }
-  mockRagSteps.retrieval = { status: 'pending', title: '混合检索' }
-  mockRagSteps.fusion = { status: 'pending', title: '融合重排' }
-  mockRagSteps.evaluation = { status: 'pending', title: '门神评估' }
 
   mockTimers.push(setTimeout(() => {
     mockRagSteps.intent!.status = 'completed'
     mockRagSteps.intent!.summary = config.intentSummary
-  }, 500))
+    // Step 2: retrieval starts
+    mockRagSteps.retrieval = { status: 'pending', title: '混合检索' }
+  }, 1000))
 
   mockTimers.push(setTimeout(() => {
     mockRagSteps.retrieval!.status = 'completed'
     mockRagSteps.retrieval!.summary = config.retrievalSummary
-  }, 1000))
+    // Step 3: fusion starts
+    mockRagSteps.fusion = { status: 'pending', title: '融合重排' }
+  }, 2000))
 
   mockTimers.push(setTimeout(() => {
     mockRagSteps.fusion!.status = 'completed'
     mockRagSteps.fusion!.summary = config.fusionSummary
-  }, 1500))
+    // Step 4: evaluation starts
+    mockRagSteps.evaluation = { status: 'pending', title: '门神评估' }
+  }, 3000))
 
   mockTimers.push(setTimeout(() => {
     mockRagSteps.evaluation!.status = 'completed'
     streamMockText(config.responseText, config.citations)
-  }, 2000))
+  }, 4000))
 }
 
 function streamMockText(text: string, citations: Citation[]) {
@@ -256,11 +265,7 @@ function streamMockText(text: string, citations: Citation[]) {
         chatStore.addStreamCitation(cite)
       }
 
-      chatStore.finishStreaming()
-      const lastMsg = chatStore.messages[chatStore.messages.length - 1]
-      if (lastMsg && lastMsg.role === 'ai') {
-        lastMsg.ragSteps = { ...mockRagSteps }
-      }
+      chatStore.finishStreaming(undefined, { ...mockRagSteps })
       resetRagSteps()
     }
   }, 40)
@@ -356,6 +361,7 @@ async function handleSend(content: string) {
           <MessageBubble
             :message="msg"
             @citation-click="handleCitationClick"
+            @show-citation-list="showCitationList"
           />
         </template>
 
@@ -373,12 +379,6 @@ async function handleSend(content: string) {
           text="正在思考..."
         />
 
-        <!-- Citation summary oval -->
-        <CitationSummary
-          v-if="uniqueCitations.length > 0 && !chatStore.isStreaming"
-          :count="uniqueCitations.length"
-          @click="showCitationList"
-        />
       </div>
 
       <!-- Input -->
@@ -392,6 +392,7 @@ async function handleSend(content: string) {
       :active-citation="activeCitation"
       :pdf-url="pdfUrl"
       :pdf-loading="pdfLoading"
+      :show-back-button="showBackButton"
       @close="closeRightPanel"
       @back-to-list="goBackToList"
       @select-citation="handlePanelSelectCitation"

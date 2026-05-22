@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Conversation, Message, Citation } from '@/types'
+import type { Conversation, Message, Citation, RagSteps } from '@/types'
 import { fetchMessagesApi, deleteConversationApi } from '@/api/chat'
 import { mockConversations, mockMessages } from '@/mock'
 import { useAuthStore } from '@/stores/auth'
@@ -217,12 +217,13 @@ export const useChatStore = defineStore('chat', () => {
     streamCitations.value.push(citation)
   }
 
-  function finishStreaming(messageId?: string) {
+  function finishStreaming(messageId?: string, ragSteps?: RagSteps) {
     const msg: Message = {
       id: messageId ?? crypto.randomUUID(),
       role: 'ai',
       content: streamContent.value,
       citations: [...streamCitations.value],
+      ragSteps: ragSteps ?? undefined,
       timestamp: Date.now(),
     }
     messages.value.push(msg)

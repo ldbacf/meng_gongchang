@@ -9,7 +9,10 @@ defineProps<{
   streamContent?: string
 }>()
 
-const emit = defineEmits<{ 'citation-click': [id: string] }>()
+const emit = defineEmits<{
+  'citation-click': [id: string]
+  'show-citation-list': []
+}>()
 </script>
 
 <template>
@@ -20,5 +23,6 @@ const emit = defineEmits<{ 'citation-click': [id: string] }>()
     :is-streaming="isStreaming"
     :stream-content="streamContent"
     @citation-click="(id) => emit('citation-click', id)"
+    @show-citation-list="emit('show-citation-list')"
   />
 </template>

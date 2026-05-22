@@ -7,15 +7,15 @@ export interface DocumentPdfResponse {
 
 const docPdfMap: Record<string, DocumentPdfResponse> = {
   'doc-001': {
-    pdfUrl: '/pdf/基层全科医生心血管疾病风险评估与沟通策略.pdf',
+    pdfUrl: '/api/pdf/1',
     totalPages: 86,
   },
   'doc-002': {
-    pdfUrl: '/pdf/慢性阻塞性肺疾病合并高血压患者肺功能与血压变异性的相关研究.pdf',
+    pdfUrl: '/api/pdf/2',
     totalPages: 112,
   },
   'doc-003': {
-    pdfUrl: '/pdf/我国基层卫生服务与管理评价指标体系研究进展.pdf',
+    pdfUrl: '/api/pdf/3',
     totalPages: 65,
   },
 }
@@ -29,7 +29,7 @@ export async function fetchDocumentPdfApi(docId: string): Promise<DocumentPdfRes
     }
     return { ...result }
   }
-  // Real API call (when backend is ready)
-  // return fetch(`/api/knowledge/documents/${docId}/pdf`).then(res => res.json())
-  throw new Error('Real API not configured')
+  const res = await fetch(`/api/knowledge/documents/${docId}/pdf`)
+  if (!res.ok) throw new Error(`Failed to fetch PDF info: ${res.status}`)
+  return res.json()
 }

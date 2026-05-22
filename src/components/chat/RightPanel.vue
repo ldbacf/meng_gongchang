@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, onBeforeUnmount } from 'vue'
 import type { Citation } from '@/types'
-import VuePdfEmbed from 'vue-pdf-embed'
+import PdfViewer from './PdfViewer.vue'
 import { X, ArrowLeft, FileText, Loader2 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -9,6 +9,7 @@ const props = defineProps<{
   activeCitation: Citation | null
   pdfUrl: string | null
   pdfLoading: boolean
+  showBackButton: boolean
 }>()
 
 const emit = defineEmits<{
@@ -17,24 +18,62 @@ const emit = defineEmits<{
   'select-citation': [citation: Citation]
 }>()
 
-const currentPage = ref(1)
+// ── Resizable panel ──
 
-watch(
-  () => props.activeCitation,
-  () => {
-    currentPage.value = 1
-  },
-)
+const panelWidth = ref(630)
+const MIN_WIDTH = 300
+const MAX_WIDTH = 720
+const isResizing = ref(false)
+
+function onResizeStart(e: MouseEvent) {
+  e.preventDefault()
+  isResizing.value = true
+  const startX = e.clientX
+  const startWidth = panelWidth.value
+
+  function onMouseMove(ev: MouseEvent) {
+    const delta = startX - ev.clientX
+    panelWidth.value = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + delta))
+  }
+
+  function onMouseUp() {
+    isResizing.value = false
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
+}
+
+onBeforeUnmount(() => {
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+})
 </script>
 
 <template>
   <aside
-    class="flex h-full w-[420px] shrink-0 flex-col border-l bg-white shadow-lg"
+    class="relative flex h-full shrink-0 flex-col border-l bg-white shadow-lg"
+    :class="{ 'select-none': isResizing }"
+    :style="{ width: panelWidth + 'px' }"
   >
+    <!-- Resize handle (left edge) -->
+    <div
+      class="absolute left-0 top-0 z-20 h-full w-1.5 cursor-col-resize hover:bg-blue-400/50 transition-colors"
+      :class="isResizing ? 'bg-blue-500' : ''"
+      style="margin-left: -3px"
+      @mousedown="onResizeStart"
+    />
+
     <!-- Header -->
     <div class="flex items-center justify-between border-b px-5 py-4">
       <span class="text-base font-semibold text-slate-800">
-        文献资源库
+        引用文献
       </span>
       <button
         class="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
@@ -45,11 +84,11 @@ watch(
     </div>
 
     <!-- Body -->
-    <div class="relative flex-1 overflow-hidden">
+    <div class="flex-1 overflow-hidden">
       <!-- LIST layer -->
       <div
         v-if="!activeCitation"
-        class="absolute inset-0 overflow-y-auto px-5 py-4 space-y-4"
+        class="h-full overflow-y-auto px-5 py-4 space-y-4"
       >
         <div
           v-for="cite in citations"
@@ -83,13 +122,12 @@ watch(
         </div>
       </div>
 
-      <!-- DETAIL overlay -->
+      <!-- DETAIL layer -->
       <div
-        v-if="activeCitation"
-        class="absolute inset-0 z-10 flex flex-col bg-white"
+        v-else
+        class="flex h-full flex-col bg-white"
       >
-        <!-- Detail header -->
-        <div class="border-b px-5 py-3">
+        <div v-if="showBackButton" class="border-b px-5 py-3">
           <button
             class="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
             @click="emit('back-to-list')"
@@ -99,32 +137,18 @@ watch(
           </button>
         </div>
 
-        <!-- PDF viewer -->
-        <div class="flex-1 overflow-auto bg-slate-100">
+        <div class="flex-1 overflow-hidden bg-slate-100">
           <div v-if="pdfLoading" class="flex items-center justify-center py-20">
             <Loader2 :size="24" class="animate-spin text-blue-500" />
             <span class="ml-2 text-sm text-slate-500">加载 PDF...</span>
           </div>
-          <div
+          <PdfViewer
             v-else-if="pdfUrl"
-            class="pdf-container h-full"
-          >
-            <VuePdfEmbed
-              :source="pdfUrl"
-              :page="currentPage"
-              text-layer
-              annotation-layer
-              class="h-full"
-            />
-          </div>
+            :url="pdfUrl"
+            :title="activeCitation?.title"
+          />
         </div>
       </div>
     </div>
   </aside>
 </template>
-
-<style scoped>
-.pdf-container :deep(canvas) {
-  max-width: 100%;
-}
-</style>

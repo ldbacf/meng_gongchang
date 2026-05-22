@@ -9,7 +9,7 @@ defineProps<{ message: Message }>()
   <div class="flex justify-end px-4 py-3">
     <div class="flex max-w-[75%] items-end gap-2.5">
       <div
-        class="rounded-2xl rounded-br-md bg-primary-600 px-4 py-2.5 text-sm leading-relaxed text-white shadow-sm"
+        class="rounded-2xl rounded-br-md bg-primary-600/85 px-4 py-2.5 text-sm leading-relaxed text-white shadow-md backdrop-blur-sm"
       >
         {{ message.content }}
       </div>

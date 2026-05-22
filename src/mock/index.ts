@@ -56,7 +56,7 @@ export const mockMessages: Record<string, Message[]> = {
           snippet:
             '基层全科医生可利用 China-PAR 模型、Framingham 风险评分等工具进行个体化心血管风险评估。风险沟通分为四步：风险评估、信息传递、行为干预和治疗决策。',
           page: 23,
-          pdfUrl: '/pdf/基层全科医生心血管疾病风险评估与沟通策略.pdf',
+          pdfUrl: '/api/pdf/1',
         },
       ],
       timestamp: Date.now() - 110_000,
@@ -82,7 +82,7 @@ export const mockMessages: Record<string, Message[]> = {
           snippet:
             '研究显示，COPD 合并高血压患者的第1秒用力呼气容积占预计值百分比 (FEV1%pred) 与收缩压标准差 (SDSBP) 呈负线性相关。FEV1%pred 越低，血压变异性越高。',
           page: 56,
-          pdfUrl: '/pdf/慢性阻塞性肺疾病合并高血压患者肺功能与血压变异性的相关研究.pdf',
+          pdfUrl: '/api/pdf/2',
         },
       ],
       timestamp: Date.now() - 3600_000,
@@ -108,7 +108,7 @@ export const mockMessages: Record<string, Message[]> = {
           snippet:
             '目前我国基层卫生评价指标主要聚焦于6类核心方向，其中以"绩效评价"为研究主题的文献数量最多（占36.9%），多采用文献分析法和德尔菲法构建指标体系。',
           page: 12,
-          pdfUrl: '/pdf/我国基层卫生服务与管理评价指标体系研究进展.pdf',
+          pdfUrl: '/api/pdf/3',
         },
       ],
       timestamp: Date.now() - 86_400_000,

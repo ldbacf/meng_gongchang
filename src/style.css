@@ -106,6 +106,38 @@
   .markdown-body strong {
     @apply font-semibold text-slate-900;
   }
+
+  .markdown-body .md-container {
+    @apply my-4 rounded-xl border px-4 py-3 text-sm leading-relaxed;
+  }
+
+  .markdown-body .md-container-tip {
+    @apply border-blue-200 bg-blue-50 text-blue-800;
+  }
+
+  .markdown-body .md-container-tip::before {
+    content: '💡 提示: ';
+    font-weight: 600;
+  }
+
+  .markdown-body .md-container-warning {
+    @apply border-amber-200 bg-amber-50 text-amber-800;
+  }
+
+  .markdown-body .md-container-warning::before {
+    content: '⚠️ 注意: ';
+    font-weight: 600;
+  }
+
+  .markdown-body .md-container-info {
+    @apply border-primary-200 bg-primary-50 text-primary-800;
+  }
+
+  .markdown-body .md-container-info::before {
+    content: 'ℹ️ 信息: ';
+    font-weight: 600;
+  }
+
 }
 
 /* Transition classes */
