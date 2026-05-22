@@ -70,9 +70,10 @@ SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
 SILICONFLOW_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
 SILICONFLOW_RERANK_MODEL = os.getenv("SILICONFLOW_RERANK_MODEL", "Qwen/Qwen3-Reranker-4B")
 
-# ── DeepSeek 意图识别 ─────────────────────────────────────
+# ── DeepSeek 意图识别 & LLM 回答 ──────────────────────────
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_INTENT_MODEL = os.getenv("DEEPSEEK_INTENT_MODEL", "deepseek-v4-flash")
+DEEPSEEK_ANSWER_MODEL = os.getenv("DEEPSEEK_ANSWER_MODEL", "deepseek-v4-pro")
 
 # ── Worker ─────────────────────────────────────────────────
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))

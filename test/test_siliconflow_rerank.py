@@ -142,10 +142,10 @@ def test_pipeline() -> bool:
         rerank_scores = [h.score_rerank for h in reranked if h.score_rerank > 0]
         if rerank_scores:
             assert rerank_scores == sorted(rerank_scores, reverse=True), "rerank 分数未降序"
-            print(f"\n  ✅ 完整链路通过 ({len(reranked)} 条结果，top-1 rerank={reranked[0].score_rerank:.4f})")
+            print(f"\n  [PASS] Pipeline OK ({len(reranked)} results, top-1 rerank={reranked[0].score_rerank:.4f})")
             return True
 
-    print(f"\n  ⚠️ rerank 未返回分数，请检查 API Key 和网络")
+    print(f"\n  [WARN] No rerank scores returned, check API key and network")
     return False
 
 
@@ -171,8 +171,8 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 60)
     if ok:
-        print("  全部测试通过 ✅")
+        print("  [PASS] All tests passed")
     else:
-        print("  部分测试失败 ⚠️")
+        print("  [WARN] Some tests failed")
     print("=" * 60)
     sys.exit(0 if ok else 1)

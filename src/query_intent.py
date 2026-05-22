@@ -16,7 +16,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-import httpx
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.config import DEEPSEEK_API_KEY, DEEPSEEK_INTENT_MODEL
 
@@ -96,39 +96,23 @@ def analyze_intent(query: str, timeout: float = 10.0) -> IntentResult:
     if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY.startswith("your-"):
         return IntentResult(rewritten_query=query)
 
-    payload = {
-        "model": DEEPSEEK_INTENT_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": query},
-        ],
-        "temperature": 0.0,
-        "max_tokens": 256,
-        "response_format": {"type": "json_object"},
-    }
+    from src.llm import get_chat_model
+
+    chat = get_chat_model(model=DEEPSEEK_INTENT_MODEL, temperature=0.0)
 
     try:
-        resp = httpx.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            timeout=timeout,
+        resp = chat.bind(response_format={"type": "json_object"}).invoke(
+            [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=query),
+            ],
         )
-        resp.raise_for_status()
-        data = resp.json()
-    except httpx.HTTPStatusError as e:
-        logger.warning("DeepSeek API HTTP %s: %s", e.response.status_code, e.response.text[:200])
-        return IntentResult(rewritten_query=query)
     except Exception as e:
         logger.warning("DeepSeek API 调用失败: %s", e)
         return IntentResult(rewritten_query=query)
 
     try:
-        content = data["choices"][0]["message"]["content"]
-        obj = json.loads(content)
+        obj = json.loads(resp.content)
         return IntentResult(
             domain=obj.get("domain", ""),
             coverage=obj.get("coverage", ""),
@@ -136,6 +120,6 @@ def analyze_intent(query: str, timeout: float = 10.0) -> IntentResult:
             keywords=obj.get("keywords", []),
             suggestion=obj.get("suggestion", ""),
         )
-    except (json.JSONDecodeError, KeyError, IndexError) as e:
-        logger.warning("DeepSeek 响应解析失败: %s | content: %s", e, content[:200] if 'content' in dir() else 'N/A')
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.warning("DeepSeek 响应解析失败: %s | content: %s", e, resp.content[:200])
         return IntentResult(rewritten_query=query)

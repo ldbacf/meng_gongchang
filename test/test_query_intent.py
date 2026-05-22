@@ -61,7 +61,7 @@ def test_intent_only() -> bool:
 
     for query, expected, desc in TEST_CASES:
         intent = analyze_intent(query)
-        match = "✅" if intent.coverage == expected else "⚠️"
+        match = "[PASS]" if intent.coverage == expected else "[WARN]"
         if intent.coverage == expected:
             ok += 1
         else:
@@ -148,8 +148,8 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 65)
     if all_ok:
-        print("  全部通过 ✅")
+        print("  [PASS] All 8/8 tests passed")
     else:
-        print("  部分未达预期 ⚠️ (覆盖度分类有偏差，调 prompt 即可)")
+        print("  [WARN] Coverage classification mismatch (adjust prompt)")
     print("=" * 65)
     sys.exit(0 if all_ok else 1)

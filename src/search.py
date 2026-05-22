@@ -21,9 +21,6 @@ from src.config import (
     MILVUS_HOST,
     MILVUS_PORT,
     MILVUS_COLLECTION,
-    SILICONFLOW_API_KEY,
-    SILICONFLOW_BASE_URL,
-    SILICONFLOW_RERANK_MODEL,
 )
 
 
@@ -34,6 +31,10 @@ class SearchHit:
     level: str = ""
     chunk_type: str = ""
     doi: str = ""
+    journal: str = ""
+    title_cn: str = ""
+    section: str = ""
+    article_type: str = ""
     heading_stack: list[str] = field(default_factory=list)
     content: str = ""
     html_body: str = ""
@@ -120,6 +121,10 @@ def _es_search(
             level=src.get("level", ""),
             chunk_type=src.get("chunk_type", ""),
             doi=src.get("doi", ""),
+            journal=src.get("journal", ""),
+            title_cn=src.get("title_cn", ""),
+            section=src.get("section", ""),
+            article_type=src.get("article_type", ""),
             heading_stack=src.get("heading_stack", []),
             content=src.get("content", ""),
             html_body=src.get("html_body", ""),
@@ -233,20 +238,14 @@ def _rrf_fusion(
 # ═══════════════════════════════════════════════════════════════
 
 
-_EMBED_MODEL = None  # 模块级单例
+_EMBED_MODEL = None
 
 
-def _get_embed_model():
+def _get_embed_model() -> "HuggingFaceEmbeddings":
     global _EMBED_MODEL
     if _EMBED_MODEL is None:
-        import os
-        if "SSL_CERT_FILE" in os.environ and not os.path.exists(os.environ["SSL_CERT_FILE"]):
-            os.environ.pop("SSL_CERT_FILE", None)
-        from sentence_transformers import SentenceTransformer
-        local = os.path.join(os.path.dirname(__file__), "..", "models", "bge-m3")
-        local = os.path.abspath(local)
-        model_id = local if os.path.isdir(local) else "BAAI/bge-m3"
-        _EMBED_MODEL = SentenceTransformer(model_id)
+        from src.llm import get_embedding_model
+        _EMBED_MODEL = get_embedding_model()
     return _EMBED_MODEL
 
 
@@ -271,7 +270,7 @@ def search(
         list[SearchHit]，按 score_rrf 降序
     """
     model = _get_embed_model()
-    q_emb = model.encode(query, normalize_embeddings=True).tolist()
+    q_emb = model.embed_query(query)
 
     m_hits = _milvus_search(q_emb, filters=filters, top_k=milvus_top_k)
     e_hits = _es_search(query, filters=filters, top_k=es_top_k)
@@ -325,47 +324,66 @@ def rerank(
     if not docs:
         return docs
 
-    # 分离有 content 和无 content 的文档
     with_content = [d for d in docs if d.content]
     without_content = [d for d in docs if not d.content]
 
-    if not with_content or not SILICONFLOW_API_KEY:
+    if not with_content:
         return docs
 
-    import httpx
+    from langchain_core.documents import Document
 
-    documents = [d.content for d in with_content]
-    payload = {
-        "model": SILICONFLOW_RERANK_MODEL,
-        "query": query,
-        "documents": documents,
-        "return_documents": False,
-    }
+    from src.reranker import SiliconFlowReranker
+
+    n = top_n if top_n else len(with_content)
+    reranker = SiliconFlowReranker(top_n=n)
+
+    lc_docs = [
+        Document(page_content=d.content, metadata={"hit_idx": i})
+        for i, d in enumerate(with_content)
+    ]
 
     try:
-        resp = httpx.post(
-            f"{SILICONFLOW_BASE_URL}/rerank",
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            timeout=60.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        ranked = reranker.compress_documents(lc_docs, query)
     except Exception:
         return docs
 
-    # 写入 rerank 分数
-    for item in data.get("results", []):
-        idx = item["index"]
-        with_content[idx].score_rerank = item["relevance_score"]
+    # 写回 score_rerank
+    for lc_doc in ranked:
+        idx = lc_doc.metadata["hit_idx"]
+        with_content[idx].score_rerank = lc_doc.metadata.get("relevance_score", 0.0)
 
-    # 有 rerank 分的按分降序，无分的保持原序
     reranked = sorted(with_content, key=lambda x: x.score_rerank, reverse=True)
-
-    if top_n:
-        reranked = reranked[:top_n]
-
     return reranked + without_content
+
+
+def search_and_answer(
+    query: str,
+    filters: dict | None = None,
+    top_k: int = 10,
+    stream: bool = False,
+) -> "AnswerResult | Generator[str, None, None]":
+    """
+    一键式：意图识别 → 双路检索 → RRF 融合 → Rerank → LLM 回答。
+
+    参数:
+        query: 用户查询
+        filters: 过滤条件
+        top_k: 召回 top-K
+        stream: 是否流式输出
+
+    返回:
+        stream=False → AnswerResult
+        stream=True  → Generator[str, None, None]
+    """
+    hits, intent = search_with_intent(query, filters=filters, top_k=top_k)
+    reranked = rerank(query, hits, top_n=5 if not stream else 10)
+
+    from src.llm_answer import answer
+
+    return answer(
+        query=query,
+        hits=reranked,
+        intent=intent,
+        top_n=5,
+        stream=stream,
+    )

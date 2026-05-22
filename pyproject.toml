@@ -20,6 +20,9 @@ dependencies = [
     "sentence-transformers>=3.0.0",
     "modelscope>=1.37.0",
     "torch>=2.6.0",
+    "langchain>=1.0.0",
+    "langchain-openai>=0.3.0",
+    "langchain-huggingface>=0.1.0",
 ]
 
 [build-system]
