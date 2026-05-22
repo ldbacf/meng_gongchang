@@ -91,6 +91,10 @@ function statusLabel(status: DocumentStatus) {
             <div class="mt-1 flex items-center gap-3">
               <span class="text-xs text-slate-400">{{ formatSize(doc.size) }}</span>
               <span
+                v-if="doc.chunks"
+                class="text-xs text-slate-400"
+              >切片 {{ doc.chunks }} 个</span>
+              <span
                 class="flex items-center gap-1 text-xs"
                 :class="statusConfig[doc.status].color"
               >

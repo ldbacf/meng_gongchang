@@ -1,17 +1,35 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 import { Send } from 'lucide-vue-next'
 
 const text = ref('')
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const emit = defineEmits<{ send: [content: string] }>()
 
 defineProps<{ disabled?: boolean }>()
 
-function handleSend() {
+function autoResize() {
+  const el = textareaRef.value
+  if (!el) return
+  el.rows = 1
+  const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
+  const maxRows = 6
+  const maxHeight = lineHeight * maxRows
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
+  el.rows = Math.min(
+    maxRows,
+    Math.max(1, Math.floor(el.scrollHeight / lineHeight)),
+  )
+}
+
+async function handleSend() {
   const content = text.value.trim()
   if (!content) return
   emit('send', content)
   text.value = ''
+  await nextTick()
+  autoResize()
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -26,16 +44,17 @@ function handleKeydown(e: KeyboardEvent) {
   <div class="border-t bg-white/80 backdrop-blur-xl px-4 py-4">
     <div class="mx-auto max-w-3xl">
       <div
-        class="flex items-end gap-3 rounded-2xl border bg-slate-50 px-4 py-3 transition-all duration-200 focus-within:border-primary-400 focus-within:bg-white focus-within:shadow-md"
+        class="flex items-end gap-3 rounded-2xl border bg-slate-50 px-4 py-3 transition-all duration-200 focus-within:border-primary-400 focus-within:bg-white focus-within:shadow-md focus-within:ring-2 focus-within:ring-primary-100"
       >
         <textarea
+          ref="textareaRef"
           v-model="text"
           :disabled="disabled"
           rows="1"
           placeholder="输入您的医学问题..."
           class="max-h-36 min-h-[24px] flex-1 resize-none bg-transparent text-sm text-slate-900 placeholder-slate-400 outline-none disabled:opacity-50"
           @keydown="handleKeydown"
-          @input="() => {}"
+          @input="autoResize"
         />
         <button
           :disabled="disabled || !text.trim()"

@@ -8,6 +8,8 @@ defineProps<{
   isStreaming?: boolean
   streamContent?: string
 }>()
+
+const emit = defineEmits<{ 'citation-click': [id: string] }>()
 </script>
 
 <template>
@@ -17,5 +19,6 @@ defineProps<{
     :message="message"
     :is-streaming="isStreaming"
     :stream-content="streamContent"
+    @citation-click="(id) => emit('citation-click', id)"
   />
 </template>

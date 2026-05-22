@@ -16,8 +16,11 @@ function selectConv(id: string) {
 
 async function deleteConv(id: string, event: Event) {
   event.stopPropagation()
+  const isCurrent = chatStore.currentConversationId === id
   await chatStore.deleteConversation(id)
-  router.push('/chat')
+  if (isCurrent) {
+    router.push('/chat')
+  }
 }
 </script>
 

@@ -5,6 +5,20 @@ export interface Citation {
   snippet: string
   url?: string
   page?: number
+  pdfUrl?: string
+}
+
+export interface RagStep {
+  status: 'pending' | 'completed'
+  title: string
+  summary?: string
+}
+
+export interface RagSteps {
+  intent?: RagStep
+  retrieval?: RagStep
+  fusion?: RagStep
+  evaluation?: RagStep
 }
 
 export interface Message {
@@ -13,6 +27,7 @@ export interface Message {
   content: string
   citations?: Citation[]
   timestamp: number
+  ragSteps?: RagSteps
 }
 
 export interface Conversation {

@@ -1,32 +1,43 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   MessageSquarePlus,
-  MessageSquare,
   Database,
   Users,
   LogOut,
-  ChevronLeft,
 } from 'lucide-vue-next'
 import AppLogo from '@/components/common/AppLogo.vue'
 import ConversationList from '@/components/chat/ConversationList.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAuth } from '@/composables/useAuth'
+import { useChatStore } from '@/stores/chat'
 
 defineProps<{ collapsed: boolean }>()
-const emit = defineEmits<{ toggle: [] }>()
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const chatStore = useChatStore()
 const { logout } = useAuth()
 
 const isAdmin = computed(() => authStore.isAdmin)
 const isActive = (path: string) => route.path === path
+const isCreating = ref(false)
 
 function navigate(path: string) {
   router.push(path)
+}
+
+async function startNewChat() {
+  if (isCreating.value) return
+  isCreating.value = true
+  try {
+    const id = await chatStore.createConversation()
+    router.push(`/chat/${id}`)
+  } finally {
+    isCreating.value = false
+  }
 }
 </script>
 
@@ -35,21 +46,16 @@ function navigate(path: string) {
     class="flex h-full flex-col border-r bg-white/60 backdrop-blur-xl"
   >
     <!-- Logo Area -->
-    <div class="flex items-center justify-between px-2 pt-2">
+    <div class="flex items-center px-2 pt-2">
       <AppLogo :collapsed="collapsed" />
-      <button
-        class="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
-        @click="emit('toggle')"
-      >
-        <ChevronLeft :size="18" />
-      </button>
     </div>
 
     <!-- New Chat Button -->
     <div class="px-3 pt-4 pb-2">
       <button
-        class="flex w-full items-center gap-2.5 rounded-xl border-2 border-dashed border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 hover:border-primary-400 hover:bg-primary-50/50 hover:text-primary-700 transition-all duration-200"
-        @click="navigate('/chat')"
+        :disabled="isCreating"
+        class="flex w-full items-center gap-2.5 rounded-xl border-2 border-dashed border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 hover:border-primary-400 hover:bg-primary-50/50 hover:text-primary-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+        @click="startNewChat"
       >
         <MessageSquarePlus :size="18" />
         <span v-if="!collapsed">发起新对话</span>

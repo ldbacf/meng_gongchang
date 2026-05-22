@@ -3,7 +3,8 @@ import type { Message, Citation } from '@/types'
 import { useMarkdown } from '@/composables/useMarkdown'
 import { computed } from 'vue'
 import CitationCard from './CitationCard.vue'
-import { Stethoscope, Sparkles } from 'lucide-vue-next'
+import RagPipelineSimple from './RagPipelineSimple.vue'
+import { Sparkles } from 'lucide-vue-next'
 
 const props = defineProps<{
   message: Message
@@ -11,6 +12,8 @@ const props = defineProps<{
   streamContent?: string
   streamCitations?: Citation[]
 }>()
+
+const emit = defineEmits<{ 'citation-click': [id: string] }>()
 
 const { render } = useMarkdown()
 
@@ -20,6 +23,18 @@ const renderedContent = computed(() => {
       ? props.streamContent
       : props.message.content
   return render(content)
+})
+
+function handleContentClick(e: MouseEvent) {
+  const target = (e.target as HTMLElement).closest('.citation-tag') as HTMLElement | null
+  if (target?.dataset.citationId) {
+    emit('citation-click', target.dataset.citationId)
+  }
+}
+
+const hasRagSteps = computed(() => {
+  const steps = props.message.ragSteps
+  return steps && Object.values(steps).some((s) => s !== undefined)
 })
 
 const displayCitations = computed(() => {
@@ -42,11 +57,18 @@ const displayCitations = computed(() => {
 
       <!-- Content -->
       <div class="min-w-0 flex-1">
+        <!-- RAG Pipeline -->
+        <RagPipelineSimple
+          v-if="message.ragSteps && hasRagSteps"
+          :steps="message.ragSteps"
+        />
+
         <!-- Markdown body -->
         <div
           v-if="renderedContent"
           class="markdown-body text-sm leading-relaxed text-slate-700"
           v-html="renderedContent"
+          @click="handleContentClick"
         />
 
         <!-- Streaming indicator -->
