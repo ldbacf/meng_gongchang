@@ -7,12 +7,14 @@ import type {
 } from '@/types'
 
 // ── Global mock switch ──
-export const USE_MOCK = true
+export const USE_MOCK = false
 
 // ── Auth ──
 export const mockLoginResponse: LoginResponse = {
-  token: 'mock-jwt-eyJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImFkbWluIn0.mock',
-  user: { username: 'admin', role: 'admin' },
+  access_token: 'mock-access-token',
+  refresh_token: 'mock-refresh-token',
+  token_type: 'bearer',
+  user: { id: 'mock-id', username: 'admin', role: 'admin', enabled: true, last_login: null },
 }
 
 // ── Conversations ──

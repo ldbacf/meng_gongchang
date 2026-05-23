@@ -1,5 +1,5 @@
 import { ref, onUnmounted } from 'vue'
-import type { StreamChunk } from '@/types'
+import type { SSEMessage } from '@/types'
 
 export function useSSE() {
   const isStreaming = ref(false)
@@ -8,10 +8,10 @@ export function useSSE() {
   async function startStream(
     url: string,
     body: Record<string, unknown>,
-    onChunk: (chunk: StreamChunk) => void,
+    onMsg: (msg: SSEMessage) => void,
     onError?: (err: Error) => void,
   ) {
-    const token = localStorage.getItem('token')
+    const token = localStorage.getItem('access_token')
     abortController = new AbortController()
     isStreaming.value = true
 
@@ -27,11 +27,17 @@ export function useSSE() {
       })
 
       if (!response.ok) {
-        throw new Error(`SSE error: ${response.status}`)
+        const errText = await response.text().catch(() => '')
+        onMsg({ t: 'error', message: `HTTP ${response.status}: ${errText.slice(0, 200)}` })
+        return
       }
 
       const reader = response.body?.getReader()
-      if (!reader) throw new Error('No response body')
+      if (!reader) {
+        const allText = await response.text()
+        _parseLines(allText, onMsg)
+        return
+      }
 
       const decoder = new TextDecoder()
       let buffer = ''
@@ -39,30 +45,15 @@ export function useSSE() {
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-
         buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6).trim()
-            if (jsonStr === '[DONE]') {
-              onChunk({ type: 'done', data: '' })
-              continue
-            }
-            try {
-              const chunk: StreamChunk = JSON.parse(jsonStr)
-              onChunk(chunk)
-            } catch {
-              // Ignore unparseable chunks
-            }
-          }
-        }
+        buffer = _parseLines(buffer, onMsg)
       }
+      // Flush any remaining complete line
+      _parseLines(buffer + '\n', onMsg)
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         onError?.(err as Error)
+        onMsg({ t: 'error', message: (err as Error).message || '连接失败' })
       }
     } finally {
       isStreaming.value = false
@@ -70,14 +61,28 @@ export function useSSE() {
     }
   }
 
+  function _parseLines(text: string, onMsg: (msg: SSEMessage) => void): string {
+    const lines = text.split('\n')
+    const remaining = lines.pop() || ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      try {
+        const raw = JSON.parse(line.slice(6))
+        const msg = raw as SSEMessage
+        if (msg.t) onMsg(msg)
+      } catch {
+        // skip unparseable lines
+      }
+    }
+    return remaining
+  }
+
   function abort() {
     abortController?.abort()
     isStreaming.value = false
   }
 
-  onUnmounted(() => {
-    abort()
-  })
+  onUnmounted(() => { abort() })
 
   return { isStreaming, startStream, abort }
 }

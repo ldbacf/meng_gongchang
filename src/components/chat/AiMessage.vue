@@ -2,9 +2,12 @@
 import type { Message } from '@/types'
 import { useMarkdown } from '@/composables/useMarkdown'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { useChatStore } from '@/stores/chat'
 import RagPipelineSimple from './RagPipelineSimple.vue'
 import CitationSummary from './CitationSummary.vue'
-import { Sparkles, ChevronDown } from 'lucide-vue-next'
+import { Sparkles, ChevronDown, AlertCircle } from 'lucide-vue-next'
+
+const chatStore = useChatStore()
 
 const props = defineProps<{
   message: Message
@@ -103,7 +106,7 @@ onBeforeUnmount(() => {
 
 // ── Persistent expand toggle ──
 
-const ragExpanded = ref(localStorage.getItem('medrag_rag_expanded') !== 'false')
+const ragExpanded = ref(localStorage.getItem('medrag_rag_expanded') === 'true')
 function toggleRag() {
   ragExpanded.value = !ragExpanded.value
   localStorage.setItem('medrag_rag_expanded', String(ragExpanded.value))
@@ -171,9 +174,17 @@ function toggleRag() {
             <span class="h-2 w-2 animate-bounce rounded-full bg-primary-400" style="animation-delay: 300ms" />
           </div>
         </div>
+        <div
+          v-if="chatStore.streamError"
+          class="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2"
+        >
+          <AlertCircle :size="14" class="mt-0.5 shrink-0 text-red-400" />
+          <p class="text-xs text-red-600 leading-relaxed">{{ chatStore.streamError }}</p>
+        </div>
         <CitationSummary
-          v-if="message.citations && message.citations.length > 0 && !isStreaming"
-          @click="emit('show-citation-list')"
+          v-if="message.citations && !isStreaming"
+          :citations="message.citations"
+          @select-citation="(cite) => emit('citation-click', cite.id)"
         />
       </div>
     </div>

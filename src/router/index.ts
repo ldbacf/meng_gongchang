@@ -48,7 +48,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('access_token')
   const user = JSON.parse(localStorage.getItem('user') ?? 'null')
 
   // Redirect to login if not authenticated and route requires auth

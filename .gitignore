@@ -33,3 +33,4 @@ yarn-error.log*
 
 # Old PDF in public/ (now served via Vite middleware from pdf/)
 /public/pdf/temp/
+pdf

@@ -1,42 +1,50 @@
 import api from './index'
 import type { Document } from '@/types'
-import { USE_MOCK, mockDocuments, simulateDelay } from '@/mock'
 
 export async function fetchDocumentsApi(): Promise<Document[]> {
-  if (USE_MOCK) {
-    await simulateDelay(150)
-    return [...mockDocuments]
+  return api.get('/v1/admin/documents').then((res) =>
+    (res.data as any[]).map((d: any) => ({
+      id: d.id,
+      name: d.original_name,
+      size: 0,
+      status: mapDocStatus(d.status),
+      progress: d.status === 'parsed' ? 100 : 50,
+      chunks: undefined,
+      uploadedAt: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
+    })),
+  )
+}
+
+function mapDocStatus(s: string): Document['status'] {
+  switch (s) {
+    case 'pending': return 'uploading'
+    case 'processing': return 'chunking'
+    case 'parsed': return 'ready'
+    case 'failed': return 'error'
+    default: return 'uploading'
   }
-  return api.get('/knowledge/documents').then((res) => res.data)
 }
 
 export async function uploadDocumentApi(file: File): Promise<Document> {
-  if (USE_MOCK) {
-    await simulateDelay(300)
-    const doc: Document = {
-      id: `doc-${crypto.randomUUID().slice(0, 8)}`,
-      name: file.name,
-      size: file.size,
-      status: 'ready',
-      progress: 100,
-      chunks: Math.floor(Math.random() * 50) + 20,
-      uploadedAt: Date.now(),
-    }
-    return doc
-  }
   const formData = new FormData()
   formData.append('file', file)
   return api
-    .post('/knowledge/documents', formData, {
+    .post('/v1/documents', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
-    .then((res) => res.data)
+    .then((res) => {
+      const d = res.data
+      return {
+        id: d.id,
+        name: d.original_name ?? file.name,
+        size: file.size,
+        status: 'uploading' as const,
+        progress: 50,
+        uploadedAt: Date.now(),
+      }
+    })
 }
 
 export async function deleteDocumentApi(id: string): Promise<void> {
-  if (USE_MOCK) {
-    await simulateDelay(100)
-    return
-  }
-  return api.delete(`/knowledge/documents/${id}`).then((res) => res.data)
+  return api.delete(`/v1/admin/documents/${id}`)
 }

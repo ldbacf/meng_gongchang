@@ -33,8 +33,7 @@ async function startNewChat() {
   if (isCreating.value) return
   isCreating.value = true
   try {
-    const id = await chatStore.createConversation()
-    router.push(`/chat/${id}`)
+    router.push('/chat')
   } finally {
     isCreating.value = false
   }

@@ -12,7 +12,7 @@ function pdfMiddlewarePlugin() {
     configureServer(server: any) {
       server.middlewares.use('/api/pdf/', (req: any, res: any) => {
         try {
-          const files = fs.readdirSync(pdfDir).filter(f => f.endsWith('.pdf'))
+          const files = fs.readdirSync(pdfDir).filter((f: string) => f.endsWith('.pdf'))
           const urlParts = req.url?.split('/') ?? []
           const lastSegment = urlParts[urlParts.length - 1]
           const fileIndex = parseInt(lastSegment, 10)
@@ -44,5 +44,11 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8005',
+        changeOrigin: true,
+      },
+    },
   },
 })

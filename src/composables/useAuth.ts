@@ -7,10 +7,10 @@ export function useAuth() {
   const router = useRouter()
 
   const isAdmin = computed(() => store.user?.role === 'admin')
-  const isAuthenticated = computed(() => !!store.token)
+  const isAuthenticated = computed(() => !!store.accessToken)
 
   function requireAuth(): boolean {
-    if (!store.token) {
+    if (!store.accessToken) {
       router.push('/login')
       return false
     }
@@ -18,7 +18,7 @@ export function useAuth() {
   }
 
   function requireAdmin(): boolean {
-    if (!store.token) {
+    if (!store.accessToken) {
       router.push('/login')
       return false
     }

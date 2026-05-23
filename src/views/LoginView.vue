@@ -103,7 +103,7 @@ function handleKeydown(e: KeyboardEvent) {
         </button>
 
         <p class="mt-4 text-center text-xs text-slate-400">
-          提示：用户名输入 <code class="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">admin</code> 获得管理员权限
+          提示：默认管理员账号 admin / admin123，登录后请修改密码
         </p>
       </div>
     </div>

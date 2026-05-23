@@ -1,7 +1,7 @@
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import container from 'markdown-it-container'
-import { useMemoize } from '@vueuse/core'
+
 
 const md = new MarkdownIt({
   html: false,
@@ -50,9 +50,20 @@ md.use(container, 'info', {
 })
 
 // ── Citation plugin ──
-// Intercepts text token rendering to convert [N] / [doc-N] into interactive citation spans.
+// Converts [N], [doc-N], and [A,B,C] citation patterns into interactive citation spans.
 md.renderer.rules.text = (tokens, idx) => {
-  return tokens[idx].content.replace(
+  let content = tokens[idx].content
+  // First split multi-citation [1,4] or [1,2,3] into separate tags
+  content = content.replace(
+    /\[(\d+(?:,\d+)+)\]/g,
+    (_m: string, ids: string) =>
+      ids
+        .split(',')
+        .map((n: string) => `[${n.trim()}]`)
+        .join(''),
+  )
+  // Then convert each [N] into a citation-tag span
+  return content.replace(
     /\[(\d+|doc-\d+)\]/g,
     (_m: string, id: string) => {
       const num = id.replace('doc-', '')
@@ -72,7 +83,9 @@ function renderRaw(text: string): string {
   return md.render(cjkFriendly)
 }
 
-const render = useMemoize(renderRaw)
+function render(text: string): string {
+  return renderRaw(text)
+}
 
 export function useMarkdown() {
   return { render }

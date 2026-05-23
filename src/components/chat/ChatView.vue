@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted, reactive, computed } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
-import type { Citation, RagSteps } from '@/types'
+import type { Citation } from '@/types'
 import { fetchDocumentPdfApi } from '@/api/document'
+import { useSSE } from '@/composables/useSSE'
+import { useToastStore } from '@/stores/toast'
 import ChatInput from './ChatInput.vue'
 import MessageBubble from './MessageBubble.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -13,10 +15,10 @@ import { Sparkles } from 'lucide-vue-next'
 const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
+const toastStore = useToastStore()
+const { startStream, abort: abortSSE } = useSSE()
 
 const messagesContainer = ref<HTMLElement | null>(null)
-const mockRagSteps = reactive<RagSteps>({})
-const mockTimers: ReturnType<typeof setTimeout>[] = []
 
 const streamMessage = {
   id: 'streaming',
@@ -27,7 +29,7 @@ const streamMessage = {
 
 const streamMessageWithRagSteps = computed(() => ({
   ...streamMessage,
-  ragSteps: mockRagSteps,
+  ragSteps: chatStore.streamRagSteps,
 }))
 
 // ── Right panel state ──
@@ -50,21 +52,18 @@ const uniqueCitations = computed(() => {
   return Array.from(map.values())
 })
 
-async function loadPdfForCitation(citationId: string) {
-  const citation = uniqueCitations.value.find((c) => c.id === citationId)
-  if (!citation) return
-
+async function loadPdfForCitation(citation: Citation) {
   activeCitation.value = citation
   rightPanelOpen.value = true
   pdfLoading.value = true
   pdfUrl.value = null
 
   try {
-    const docNum = parseInt(citationId, 10)
-    const docId = isNaN(docNum) ? null : `doc-${String(docNum - 100).padStart(3, '0')}`
-    if (docId) {
-      const res = await fetchDocumentPdfApi(docId)
-      pdfUrl.value = res.pdfUrl
+    if (citation.doc_id) {
+      const res = await fetchDocumentPdfApi(citation.doc_id)
+      pdfUrl.value = res.pdf_url
+    } else if (citation.pdfUrl) {
+      pdfUrl.value = citation.pdfUrl
     }
   } catch {
     pdfUrl.value = citation.pdfUrl ?? null
@@ -75,7 +74,10 @@ async function loadPdfForCitation(citationId: string) {
 
 async function handleCitationClick(citationId: string) {
   showBackButton.value = false
-  await loadPdfForCitation(citationId)
+  const citation = uniqueCitations.value.find((c) => c.id === citationId)
+  if (citation) {
+    await loadPdfForCitation(citation)
+  }
 }
 
 function showCitationList() {
@@ -98,178 +100,7 @@ function goBackToList() {
 
 function handlePanelSelectCitation(citation: Citation) {
   showBackButton.value = true
-  loadPdfForCitation(citation.id)
-}
-
-// ── Mock pipeline ──
-
-function clearMockTimers() {
-  mockTimers.forEach(clearTimeout)
-  mockTimers.length = 0
-}
-
-onUnmounted(clearMockTimers)
-
-function resetRagSteps() {
-  delete mockRagSteps.intent
-  delete mockRagSteps.retrieval
-  delete mockRagSteps.fusion
-  delete mockRagSteps.evaluation
-}
-
-type Scenario = 'cardiovascular' | 'copd' | 'evaluation' | 'default'
-
-interface ScenarioConfig {
-  intentSummary: string
-  retrievalSummary: string
-  fusionSummary: string
-  responseText: string
-  citations: Citation[]
-}
-
-const scenarioConfigs: Record<Scenario, ScenarioConfig> = {
-  cardiovascular: {
-    intentSummary: '"全科医生", "心血管疾病", "风险评估"',
-    retrievalSummary:
-      'Milvus 向量库召回《基层全科医生心血管疾病风险评估与沟通策略》等 24 个片段，去重后保留 12 个。',
-    fusionSummary:
-      '应用 BGE-Reranker-v2 重排序，精选 Top-5 高匹配度内容。',
-    responseText:
-      '根据**《基层全科医生心血管疾病风险评估与沟通策略》**，基层全科医生可利用 China-PAR 模型等工具进行个体化评估。完整的风险沟通包含四步：风险评估、信息传递、行为干预和治疗决策。[101]\n\n这有助于提高患者的健康认知与药物依从性。',
-    citations: [
-      {
-        id: '101',
-        title: '基层全科医生心血管疾病风险评估与沟通策略',
-        source: '中华全科医师杂志',
-        snippet:
-          '基层全科医生可利用 China-PAR 模型、Framingham 风险评分等工具进行个体化心血管风险评估。风险沟通分为四步：风险评估、信息传递、行为干预和治疗决策。',
-        page: 23,
-        pdfUrl: '/api/pdf/1',
-      },
-    ],
-  },
-  copd: {
-    intentSummary: '"COPD", "高血压", "血压变异性"',
-    retrievalSummary:
-      'Milvus 向量库召回《慢性阻塞性肺疾病合并高血压患者肺功能与血压变异性的相关研究》等 31 个片段，去重后保留 16 个。',
-    fusionSummary:
-      '应用 BGE-Reranker-v2 重排序，精选 Top-5 高匹配度内容。',
-    responseText:
-      '根据**《慢性阻塞性肺疾病合并高血压患者肺功能与血压变异性的相关研究》**显示，患者的 FEV1%pred 与收缩压及舒张压标准差均呈负相关。[102]\n\n这意味着肺功能指标（FEV1%pred）越低，可能会导致血压变异性越高，临床中需特别关注。',
-    citations: [
-      {
-        id: '102',
-        title: '慢性阻塞性肺疾病合并高血压患者肺功能与血压变异性的相关研究',
-        source: '中华结核和呼吸杂志',
-        snippet:
-          '研究显示，COPD 合并高血压患者的第1秒用力呼气容积占预计值百分比 (FEV1%pred) 与收缩压标准差 (SDSBP) 呈负线性相关。FEV1%pred 越低，血压变异性越高。',
-        page: 56,
-        pdfUrl: '/api/pdf/2',
-      },
-    ],
-  },
-  evaluation: {
-    intentSummary: '"基层卫生服务", "评价指标体系"',
-    retrievalSummary:
-      'Milvus 向量库召回《我国基层卫生服务与管理评价指标体系研究进展》等 19 个片段，去重后保留 9 个。',
-    fusionSummary:
-      '应用 BGE-Reranker-v2 重排序，精选 Top-5 高匹配度内容。',
-    responseText:
-      '参考**《我国基层卫生服务与管理评价指标体系研究进展》**，目前相关研究主要聚焦6个方向。其中以"绩效评价"相关的研究数量最多，占比达36.9%。[103]\n\n现阶段评价体系以定量硬指标占主导地位。',
-    citations: [
-      {
-        id: '103',
-        title: '我国基层卫生服务与管理评价指标体系研究进展',
-        source: '中国卫生政策研究',
-        snippet:
-          '目前我国基层卫生评价指标主要聚焦于6类核心方向，其中以"绩效评价"为研究主题的文献数量最多（占36.9%），多采用文献分析法和德尔菲法构建指标体系。',
-        page: 12,
-        pdfUrl: '/api/pdf/3',
-      },
-    ],
-  },
-  default: {
-    intentSummary: '"医学文献", "循证检索"',
-    retrievalSummary:
-      'Milvus 向量库及 ES 共同召回了 28 个医学相关片段，去重后保留 15 个。',
-    fusionSummary:
-      '应用 BGE-Reranker-v2 重排序，精选 Top-5 高匹配度内容。',
-    responseText:
-      '根据知识库检索结果，未找到与您问题高度匹配的特定文献。建议您尝试使用更具体的医学关键词，如"心血管风险评估"、"COPD肺功能"或"基层卫生评价指标"进行查询。[100]',
-    citations: [
-      {
-        id: '100',
-        title: 'MedRAG 系统检索提示',
-        source: '系统消息',
-        snippet:
-          '请使用具体医学关键词查询，如：心血管风险评估、COPD合并高血压、基层卫生服务评价指标体系等。',
-      },
-    ],
-  },
-}
-
-function detectScenario(content: string): Scenario {
-  const lower = content.toLowerCase()
-  if (/心血管|全科/.test(lower)) return 'cardiovascular'
-  if (/copd|阻塞|高血压/.test(lower)) return 'copd'
-  if (/评价|基层卫生/.test(lower)) return 'evaluation'
-  return 'default'
-}
-
-function runMockPipeline(userMessage: string) {
-  clearMockTimers()
-  const scenario = detectScenario(userMessage)
-  const config = scenarioConfigs[scenario]
-
-  // Step 1: intent starts immediately
-  mockRagSteps.intent = { status: 'pending', title: '意图识别' }
-
-  mockTimers.push(setTimeout(() => {
-    mockRagSteps.intent!.status = 'completed'
-    mockRagSteps.intent!.summary = config.intentSummary
-    // Step 2: retrieval starts
-    mockRagSteps.retrieval = { status: 'pending', title: '混合检索' }
-  }, 1000))
-
-  mockTimers.push(setTimeout(() => {
-    mockRagSteps.retrieval!.status = 'completed'
-    mockRagSteps.retrieval!.summary = config.retrievalSummary
-    // Step 3: fusion starts
-    mockRagSteps.fusion = { status: 'pending', title: '融合重排' }
-  }, 2000))
-
-  mockTimers.push(setTimeout(() => {
-    mockRagSteps.fusion!.status = 'completed'
-    mockRagSteps.fusion!.summary = config.fusionSummary
-    // Step 4: evaluation starts
-    mockRagSteps.evaluation = { status: 'pending', title: '门神评估' }
-  }, 3000))
-
-  mockTimers.push(setTimeout(() => {
-    mockRagSteps.evaluation!.status = 'completed'
-    streamMockText(config.responseText, config.citations)
-  }, 4000))
-}
-
-function streamMockText(text: string, citations: Citation[]) {
-  let i = 0
-  const interval = setInterval(() => {
-    if (i < text.length) {
-      chatStore.streamContent += text[i]
-      i++
-    } else {
-      clearInterval(interval)
-      mockTimers.splice(mockTimers.indexOf(interval), 1)
-
-      for (const cite of citations) {
-        chatStore.addStreamCitation(cite)
-      }
-
-      chatStore.finishStreaming(undefined, { ...mockRagSteps })
-      resetRagSteps()
-    }
-  }, 40)
-  mockTimers.push(interval)
+  loadPdfForCitation(citation)
 }
 
 // ── Lifecycle ──
@@ -283,10 +114,14 @@ onMounted(async () => {
   }
 })
 
+onUnmounted(() => {
+  abortSSE()
+})
+
 function abortStreaming() {
-  clearMockTimers()
-  resetRagSteps()
+  abortSSE()
   if (chatStore.isStreaming) {
+    chatStore.stopReveal()
     chatStore.isStreaming = false
     chatStore.streamContent = ''
     chatStore.streamCitations = []
@@ -298,10 +133,22 @@ watch(
   async (newId) => {
     abortStreaming()
     if (newId && typeof newId === 'string') {
-      chatStore.selectConversation(newId)
+      if (chatStore.currentConversationId !== newId) {
+        chatStore.selectConversation(newId)
+      }
     } else {
       chatStore.currentConversationId = null
       chatStore.messages = []
+    }
+  },
+)
+
+// Sync URL after lazy conversation creation
+watch(
+  () => chatStore.isStreaming,
+  (streaming) => {
+    if (!streaming && chatStore.currentConversationId && !route.params.id) {
+      router.replace(`/chat/${chatStore.currentConversationId}`)
     }
   },
 )
@@ -316,16 +163,31 @@ watch(
   },
 )
 
+// ── Send message ──
+
 async function handleSend(content: string) {
   if (!chatStore.currentConversationId) {
-    const id = await chatStore.createConversation()
-    router.replace(`/chat/${id}`)
+    await chatStore.createConversation(content.slice(0, 30) + (content.length > 30 ? '...' : ''))
   }
 
   chatStore.addUserMessage(content)
   chatStore.startStreaming()
 
-  runMockPipeline(content)
+  startStream(
+    '/api/v1/chat/stream',
+    {
+      conversation_id: chatStore.currentConversationId,
+      message: content,
+    },
+    (msg) => {
+      chatStore.handleStreamMsg(msg)
+    },
+    (err) => {
+      console.error('SSE error:', err)
+      toastStore.error('流式连接失败: ' + (err.message || '未知错误'))
+      chatStore.isStreaming = false
+    },
+  )
 }
 </script>
 
@@ -370,7 +232,9 @@ async function handleSend(content: string) {
           <MessageBubble
             :message="streamMessageWithRagSteps"
             :is-streaming="true"
-            :stream-content="chatStore.streamContent"
+            :stream-content="chatStore.revealedContent"
+            @citation-click="handleCitationClick"
+            @show-citation-list="showCitationList"
           />
         </div>
 
