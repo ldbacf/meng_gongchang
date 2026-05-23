@@ -82,12 +82,18 @@ class IntentResult:
     suggestion: str = ""
 
 
-def analyze_intent(query: str, timeout: float = 10.0) -> IntentResult:
+def analyze_intent(
+    query: str,
+    last_context: str = "",
+    timeout: float = 10.0,
+) -> IntentResult:
     """
     分析用户查询意图，返回分类结果和重写后的 query。
 
     参数:
         query: 用户原始查询
+        last_context: 最近对话上下文（用于指代消解），格式：
+                      用户：xxx\nAI：xxx\n用户：xxx
         timeout: API 超时秒数
 
     返回:
@@ -100,11 +106,15 @@ def analyze_intent(query: str, timeout: float = 10.0) -> IntentResult:
 
     chat = get_chat_model(model=DEEPSEEK_INTENT_MODEL, temperature=0.0)
 
+    user_message = query
+    if last_context:
+        user_message = f"上轮对话：\n{last_context}\n\n当前提问：{query}\n\n请根据上轮对话，将当前提问中可能存在的指代词（如\"它\"\"这个\"\"上面\"）替换为具体内容，重写为独立的检索查询。"
+
     try:
         resp = chat.bind(response_format={"type": "json_object"}).invoke(
             [
                 SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=query),
+                HumanMessage(content=user_message),
             ],
         )
     except Exception as e:

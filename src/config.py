@@ -20,6 +20,14 @@ DATABASE_URL = os.getenv(
     f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}",
 )
 
+# ── JWT Auth ─────────────────────────────────────────────────
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+if not JWT_SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY 未设置！请在 .env 中配置 JWT_SECRET_KEY")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_ACCESS_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_EXPIRE_MINUTES", "15"))
+JWT_REFRESH_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_EXPIRE_DAYS", "7"))
+
 # ── Redis ──────────────────────────────────────────────────
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
@@ -74,6 +82,9 @@ SILICONFLOW_RERANK_MODEL = os.getenv("SILICONFLOW_RERANK_MODEL", "Qwen/Qwen3-Rer
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_INTENT_MODEL = os.getenv("DEEPSEEK_INTENT_MODEL", "deepseek-v4-flash")
 DEEPSEEK_ANSWER_MODEL = os.getenv("DEEPSEEK_ANSWER_MODEL", "deepseek-v4-pro")
+
+# ── CORS ───────────────────────────────────────────────────
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
 
 # ── Worker ─────────────────────────────────────────────────
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))

@@ -221,13 +221,19 @@ def _rrf_fusion(
         merged[cid].rank_es = hit.rank_es
         merged[cid].score_rrf += 1.0 / (k + hit.rank_es)
 
-        # 从 ES 回填 content（Milvus 不存）
+        # 从 ES 回填 Milvus 没有的字段
         if hit.content:
             merged[cid].content = hit.content
         if hit.html_body:
             merged[cid].html_body = hit.html_body
         if hit.heading_stack:
             merged[cid].heading_stack = hit.heading_stack
+        if hit.title_cn:
+            merged[cid].title_cn = hit.title_cn
+        if hit.journal:
+            merged[cid].journal = hit.journal
+        if hit.doi:
+            merged[cid].doi = hit.doi
 
     sorted_hits = sorted(merged.values(), key=lambda x: x.score_rrf, reverse=True)
     return sorted_hits[:top_k]
