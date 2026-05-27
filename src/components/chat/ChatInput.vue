@@ -56,7 +56,7 @@ function handleKeydown(e: KeyboardEvent) {
         />
         <button
           :disabled="disabled || !text.trim()"
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-600 text-white shadow-sm transition-all hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
+          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-600 text-white shadow-sm transition-all hover:bg-primary-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
           @click="handleSend"
         >
           <Send :size="16" />

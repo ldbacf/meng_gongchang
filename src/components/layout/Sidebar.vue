@@ -53,7 +53,7 @@ async function startNewChat() {
     <div class="px-3 pt-4 pb-2">
       <button
         :disabled="isCreating"
-        class="flex w-full items-center gap-2.5 rounded-xl border-2 border-dashed border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 hover:border-primary-400 hover:bg-primary-50/50 hover:text-primary-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="flex w-full items-center gap-2.5 rounded-xl border-2 border-dashed border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 hover:border-primary-400 hover:bg-primary-50/50 hover:text-primary-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:outline-none active:scale-[0.98]"
         @click="startNewChat"
       >
         <MessageSquarePlus :size="18" />
@@ -75,7 +75,7 @@ async function startNewChat() {
         管理后台
       </p>
       <button
-        class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+        class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:outline-none"
         :class="
           isActive('/admin/knowledge')
             ? 'bg-primary-50 text-primary-700'
@@ -87,7 +87,7 @@ async function startNewChat() {
         知识库管理
       </button>
       <button
-        class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+        class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:outline-none"
         :class="
           isActive('/admin/users')
             ? 'bg-primary-50 text-primary-700'
@@ -112,7 +112,7 @@ async function startNewChat() {
           </p>
         </div>
         <button
-          class="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+          class="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:outline-none"
           @click="logout"
         >
           <LogOut :size="16" />

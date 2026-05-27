@@ -5,6 +5,7 @@ import { fetchConversationsApi, createConversationApi, fetchMessagesApi, deleteC
 
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<Conversation[]>([])
+  const conversationsLoading = ref(true)
   const currentConversationId = ref<string | null>(null)
   const messages = ref<Message[]>([])
   const isStreaming = ref(false)
@@ -36,8 +37,8 @@ export const useChatStore = defineStore('chat', () => {
   async function fetchConversations() {
     try {
       conversations.value = await fetchConversationsApi()
-    } catch {
-      // Keep current state on API failure
+    } finally {
+      conversationsLoading.value = false
     }
   }
 
@@ -231,6 +232,7 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     conversations,
+    conversationsLoading,
     currentConversationId,
     messages,
     isStreaming,

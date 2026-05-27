@@ -6,19 +6,22 @@ import type { Citation } from '@/types'
 import { fetchDocumentPdfApi } from '@/api/document'
 import { useSSE } from '@/composables/useSSE'
 import { useToastStore } from '@/stores/toast'
+import { useAdminStore } from '@/stores/admin'
 import ChatInput from './ChatInput.vue'
 import MessageBubble from './MessageBubble.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import RightPanel from './RightPanel.vue'
-import { Sparkles } from 'lucide-vue-next'
+import { Sparkles, Library } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
 const toastStore = useToastStore()
+const adminStore = useAdminStore()
 const { startStream, abort: abortSSE } = useSSE()
 
 const messagesContainer = ref<HTMLElement | null>(null)
+const messagesLoading = ref(false)
 
 const streamMessage = {
   id: 'streaming',
@@ -108,6 +111,12 @@ function handlePanelSelectCitation(citation: Citation) {
 onMounted(async () => {
   await chatStore.fetchConversations()
 
+  await adminStore.fetchKnowledgeBases()
+  if (!adminStore.activeKbId) {
+    const defaultKb = adminStore.knowledgeBases.find((k) => k.slug === 'zhong_guo_quan_ke')
+    if (defaultKb) adminStore.setActiveKb(defaultKb.id)
+  }
+
   const convId = route.params.id as string | undefined
   if (convId) {
     chatStore.selectConversation(convId)
@@ -134,11 +143,16 @@ watch(
     abortStreaming()
     if (newId && typeof newId === 'string') {
       if (chatStore.currentConversationId !== newId) {
-        chatStore.selectConversation(newId)
+        messagesLoading.value = true
+        await chatStore.selectConversation(newId)
+        messagesLoading.value = false
+        await nextTick()
+        messagesContainer.value?.lastElementChild?.scrollIntoView()
       }
     } else {
       chatStore.currentConversationId = null
       chatStore.messages = []
+      messagesLoading.value = false
     }
   },
 )
@@ -178,6 +192,7 @@ async function handleSend(content: string) {
     {
       conversation_id: chatStore.currentConversationId,
       message: content,
+      kb_id: adminStore.activeKbId,
     },
     (msg) => {
       chatStore.handleStreamMsg(msg)
@@ -206,7 +221,7 @@ async function handleSend(content: string) {
           class="flex h-full flex-col items-center justify-center px-4"
         >
           <div
-            class="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-sky-400 shadow-lg mb-6"
+            class="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-sky-400 shadow-lg mb-6 animate-float"
           >
             <Sparkles :size="32" class="text-white" />
           </div>
@@ -218,14 +233,28 @@ async function handleSend(content: string) {
           </p>
         </div>
 
+        <!-- Skeleton loading -->
+        <div v-if="messagesLoading" class="flex flex-col gap-3 px-4 py-4">
+          <div v-for="i in 3" :key="'sk-' + i" class="flex gap-3 animate-pulse">
+            <div class="h-8 w-8 shrink-0 rounded-full bg-slate-200" />
+            <div class="flex-1 space-y-2">
+              <div class="h-3 w-32 rounded bg-slate-200" />
+              <div class="h-3 w-full rounded bg-slate-100" />
+              <div class="h-3 w-3/4 rounded bg-slate-100" />
+            </div>
+          </div>
+        </div>
+
         <!-- Messages -->
-        <template v-for="msg in chatStore.messages" :key="msg.id">
-          <MessageBubble
-            :message="msg"
-            @citation-click="handleCitationClick"
-            @show-citation-list="showCitationList"
-          />
-        </template>
+        <TransitionGroup name="msg">
+          <template v-for="msg in chatStore.messages" :key="msg.id">
+            <MessageBubble
+              :message="msg"
+              @citation-click="handleCitationClick"
+              @show-citation-list="showCitationList"
+            />
+          </template>
+        </TransitionGroup>
 
         <!-- Live streaming message -->
         <div v-if="chatStore.isStreaming">
@@ -246,13 +275,24 @@ async function handleSend(content: string) {
       </div>
 
       <!-- Input -->
+      <!-- Active KB indicator -->
+      <div v-if="adminStore.activeKb" class="flex items-center justify-center border-t bg-white/50 px-4 py-1.5">
+        <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
+          <Library :size="12" class="text-primary-400" />
+          <span>当前知识库：</span>
+          <span class="font-medium text-slate-600">{{ adminStore.activeKb.name }}</span>
+          <span class="text-slate-300">—</span>
+          <span>在知识库管理中切换</span>
+        </div>
+      </div>
       <ChatInput :disabled="chatStore.isStreaming" @send="handleSend" />
     </div>
 
     <!-- Right: Citation panel -->
-    <RightPanel
-      v-if="rightPanelOpen"
-      :citations="uniqueCitations"
+    <Transition name="panel">
+      <RightPanel
+        v-if="rightPanelOpen"
+        :citations="uniqueCitations"
       :active-citation="activeCitation"
       :pdf-url="pdfUrl"
       :pdf-loading="pdfLoading"
@@ -260,6 +300,9 @@ async function handleSend(content: string) {
       @close="closeRightPanel"
       @back-to-list="goBackToList"
       @select-citation="handlePanelSelectCitation"
-    />
+      />
+    </Transition>
   </div>
 </template>
+
+

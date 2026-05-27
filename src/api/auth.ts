@@ -16,3 +16,7 @@ export async function fetchMeApi(): Promise<UserResponse> {
 export async function logoutApi(refreshToken?: string): Promise<void> {
   return api.post('/v1/auth/logout', { refresh_token: refreshToken ?? null })
 }
+
+export async function registerApi(username: string, password: string): Promise<{ ok: boolean; message: string }> {
+  return api.post('/v1/auth/register', { username, password }).then((res) => res.data)
+}

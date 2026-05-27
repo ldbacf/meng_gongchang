@@ -1,50 +1,40 @@
 import api from './index'
-import type { Document } from '@/types'
+import type { KnowledgeBase, DocumentInfo, KBCreatePayload } from '@/types/knowledge'
 
-export async function fetchDocumentsApi(): Promise<Document[]> {
-  return api.get('/v1/admin/documents').then((res) =>
-    (res.data as any[]).map((d: any) => ({
-      id: d.id,
-      name: d.original_name,
-      size: 0,
-      status: mapDocStatus(d.status),
-      progress: d.status === 'parsed' ? 100 : 50,
-      chunks: undefined,
-      uploadedAt: d.created_at ? new Date(d.created_at).getTime() : Date.now(),
-    })),
-  )
+// ── Knowledge Bases ──
+
+export async function fetchKnowledgeBasesApi(): Promise<KnowledgeBase[]> {
+  return api.get('/v1/admin/knowledge-bases').then((res) => res.data)
 }
 
-function mapDocStatus(s: string): Document['status'] {
-  switch (s) {
-    case 'pending': return 'uploading'
-    case 'processing': return 'chunking'
-    case 'parsed': return 'ready'
-    case 'failed': return 'error'
-    default: return 'uploading'
-  }
+export async function createKnowledgeBaseApi(payload: KBCreatePayload): Promise<KnowledgeBase> {
+  return api.post('/v1/admin/knowledge-bases', payload).then((res) => res.data)
 }
 
-export async function uploadDocumentApi(file: File): Promise<Document> {
+export async function deleteKnowledgeBaseApi(id: string): Promise<void> {
+  return api.delete(`/v1/admin/knowledge-bases/${id}`)
+}
+
+// ── Documents (KB-scoped) ──
+
+export async function fetchDocumentsApi(kbId: string): Promise<DocumentInfo[]> {
+  return api.get(`/v1/admin/knowledge-bases/${kbId}/documents`).then((res) => res.data)
+}
+
+export async function uploadDocumentApi(kbId: string, file: File): Promise<DocumentInfo> {
   const formData = new FormData()
   formData.append('file', file)
   return api
-    .post('/v1/documents', formData, {
+    .post(`/v1/admin/knowledge-bases/${kbId}/documents`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
-    .then((res) => {
-      const d = res.data
-      return {
-        id: d.id,
-        name: d.original_name ?? file.name,
-        size: file.size,
-        status: 'uploading' as const,
-        progress: 50,
-        uploadedAt: Date.now(),
-      }
-    })
+    .then((res) => res.data)
 }
 
 export async function deleteDocumentApi(id: string): Promise<void> {
   return api.delete(`/v1/admin/documents/${id}`)
+}
+
+export async function retryDocumentApi(id: string): Promise<{ ok: boolean; retry_from: string }> {
+  return api.post(`/v1/admin/documents/${id}/retry`).then((res) => res.data)
 }

@@ -2,7 +2,6 @@ import type {
   LoginResponse,
   Conversation,
   Message,
-  Document,
   SystemUser,
 } from '@/types'
 
@@ -119,7 +118,7 @@ export const mockMessages: Record<string, Message[]> = {
 }
 
 // ── Knowledge base documents ──
-export const mockDocuments: Document[] = [
+export const mockDocuments: any[] = [
   {
     id: 'doc-001',
     name: '基层全科医生心血管疾病风险评估与沟通策略.pdf',

@@ -4,6 +4,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @layer base {
   * {
     @apply border-slate-200;
@@ -190,4 +199,36 @@
   border-color: #2563eb;
   transform: translateY(-1px);
   box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
+}
+
+/* ── Message bubble enter ── */
+.msg-enter-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.msg-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+/* ── Right panel slide ── */
+.panel-enter-active,
+.panel-leave-active {
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+.panel-enter-from,
+.panel-leave-to {
+  transform: translateX(20px);
+  opacity: 0;
+}
+
+/* ── Float animation for empty state icon ── */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
 }

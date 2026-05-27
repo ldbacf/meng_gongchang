@@ -9,6 +9,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false },
   },
   {
+    path: '/register',
+    name: 'Register',
+    component: () => import('@/views/RegisterView.vue'),
+    meta: { requiresAuth: false },
+  },
+  {
     path: '/chat',
     name: 'Chat',
     component: () => import('@/views/ChatView.vue'),
@@ -24,6 +30,12 @@ const routes: RouteRecordRaw[] = [
     path: '/admin/knowledge',
     name: 'KnowledgeBase',
     component: () => import('@/views/KnowledgeBaseView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
+    path: '/admin/knowledge/:kbId',
+    name: 'KnowledgeBaseDetail',
+    component: () => import('@/views/KnowledgeBaseDetailView.vue'),
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   {

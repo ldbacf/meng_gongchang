@@ -58,7 +58,7 @@ function coverageLabel(cov: string): string {
     case 'medium': return '中覆盖'
     case 'low': return '低覆盖'
     case 'out_of_domain': return '无覆盖'
-    default: return '未知'
+    default: return ''
   }
 }
 
@@ -193,14 +193,16 @@ const stepList = computed(() => [
             <!-- Expanded content -->
             <div
               v-if="expandedSteps[item.key] && getStep(item.key)"
-              class="mt-1.5 rounded-md border px-3 py-2.5"
+              class="v-collapse"
               :class="item.lineClass"
             >
+              <div class="mt-1.5 rounded-md border px-3 py-2.5" :class="item.lineClass">
 
               <!-- ── Intent step ── -->
               <template v-if="item.key === 'intent' && getStep(item.key)!.metrics">
                 <div class="flex flex-wrap items-center gap-1.5 mb-2">
                   <span
+                    v-if="(getStep(item.key)!.metrics as IntentMetrics).coverage !== 'unknown'"
                     class="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold border"
                     :class="coverageColor((getStep(item.key)!.metrics as IntentMetrics).coverage)"
                   >
@@ -379,6 +381,7 @@ const stepList = computed(() => [
                 </p>
               </template>
 
+              </div>
             </div>
           </div>
         </template>
@@ -388,6 +391,11 @@ const stepList = computed(() => [
 </template>
 
 <style scoped>
+.v-collapse {
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.2s ease;
+}
+
 @keyframes shimmer {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(200%); }

@@ -128,7 +128,7 @@ function toggleRag() {
         <!-- Thinking pill -->
         <button
           v-if="hasRagSteps"
-          class="mb-2 inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium shadow-sm transition-all duration-200 hover:scale-105"
+          class="mb-2 inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium shadow-sm transition-all duration-200 hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:outline-none"
           :class="{
             'animate-breathe border-primary-400 bg-primary-50 text-primary-700': isProcessing,
             'border-primary-200 bg-primary-50/70 text-primary-700 hover:border-primary-300 hover:bg-primary-100': !isProcessing,

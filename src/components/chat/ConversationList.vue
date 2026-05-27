@@ -99,8 +99,15 @@ function handleEditKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="space-y-0.5">
+    <!-- Skeleton -->
+    <div v-if="chatStore.conversationsLoading" class="space-y-1 px-3 py-2">
+      <div v-for="i in 4" :key="'cs-' + i" class="flex items-center gap-2.5 py-1.5">
+        <div class="h-4 w-4 shrink-0 rounded bg-slate-200 animate-pulse" />
+        <div class="h-3 flex-1 rounded bg-slate-200 animate-pulse" :style="{ width: `${60 + i * 10}%` }" />
+      </div>
+    </div>
     <p
-      v-if="sortedList.length === 0"
+      v-if="!chatStore.conversationsLoading && sortedList.length === 0"
       class="px-2 py-4 text-center text-xs text-slate-400"
     >
       暂无历史对话
@@ -108,7 +115,7 @@ function handleEditKeydown(e: KeyboardEvent) {
     <div
       v-for="conv in sortedList"
       :key="conv.id"
-      class="group flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-slate-100"
+      class="group flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:outline-none"
       :class="
         chatStore.currentConversationId === conv.id
           ? 'bg-slate-100 text-slate-900'

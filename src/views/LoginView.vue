@@ -94,7 +94,7 @@ function handleKeydown(e: KeyboardEvent) {
 
         <button
           :disabled="isLoading"
-          class="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
           @click="handleLogin"
         >
           <LogIn :size="16" />
@@ -103,7 +103,8 @@ function handleKeydown(e: KeyboardEvent) {
         </button>
 
         <p class="mt-4 text-center text-xs text-slate-400">
-          提示：默认管理员账号 admin / admin123，登录后请修改密码
+          没有账号？
+          <router-link to="/register" class="text-primary-600 hover:text-primary-700 transition-colors">立即注册</router-link>
         </p>
       </div>
     </div>

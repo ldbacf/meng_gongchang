@@ -18,7 +18,7 @@ const isActive = (path: string) => route.path === path
   <header class="flex h-14 items-center justify-between border-b bg-white/80 backdrop-blur-xl px-4 lg:hidden">
     <div class="flex items-center gap-3">
       <button
-        class="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+        class="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:outline-none"
       >
         <PanelLeft :size="20" />
       </button>
