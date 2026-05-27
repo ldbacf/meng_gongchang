@@ -82,9 +82,18 @@ class IntentResult:
     suggestion: str = ""
 
 
+GENERIC_PROMPT = """你是通用文档检索的查询重写助手。
+
+任务：将用户口语化查询重写为更适合全文检索+语义检索的形式（展开缩写、补充同义词、标准化术语），保留原意。
+
+输出格式：只输出一行 JSON，不要任何额外文字:
+{"domain":"通用文档","coverage":"unknown","rewritten_query":"重写后的query","keywords":["词1","词2","词3"],"suggestion":""}"""
+
+
 def analyze_intent(
     query: str,
     last_context: str = "",
+    is_generic: bool = False,
     timeout: float = 10.0,
 ) -> IntentResult:
     """
@@ -106,6 +115,8 @@ def analyze_intent(
 
     chat = get_chat_model(model=DEEPSEEK_INTENT_MODEL, temperature=0.0)
 
+    system_prompt = GENERIC_PROMPT if is_generic else SYSTEM_PROMPT
+
     user_message = query
     if last_context:
         user_message = f"上轮对话：\n{last_context}\n\n当前提问：{query}\n\n请根据上轮对话，将当前提问中可能存在的指代词（如\"它\"\"这个\"\"上面\"）替换为具体内容，重写为独立的检索查询。"
@@ -113,7 +124,7 @@ def analyze_intent(
     try:
         resp = chat.bind(response_format={"type": "json_object"}).invoke(
             [
-                SystemMessage(content=SYSTEM_PROMPT),
+                SystemMessage(content=system_prompt),
                 HumanMessage(content=user_message),
             ],
         )

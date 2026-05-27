@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth import get_current_user
 from src.db import get_db
-from src.models import Conversation, Message, User
+from src.models import Conversation, KnowledgeBase, Message, User
 from src.schemas import (
     ChatSendRequest,
     CitationSchema,
@@ -247,10 +247,24 @@ async def chat_stream(
                 lines.append(f"{role_label}：{m.content[:300]}")
             last_context = "\n".join(lines)
 
+        # Lookup KB for indexing/search targets
+        es_idx = None
+        mv_col = None
+        is_generic_kb = False
+        if req.kb_id:
+            kb_result = await db.execute(
+                select(KnowledgeBase).where(KnowledgeBase.id == req.kb_id)
+            )
+            kb = kb_result.scalar_one_or_none()
+            if kb:
+                es_idx = kb.es_index
+                mv_col = kb.milvus_collection
+                is_generic_kb = kb.slug != "zhong_guo_quan_ke"
+
         # Step 1: 意图识别
         t1 = time.perf_counter()
         yield _sl({"t":"step","k":"intent","s":"pending","title":"意图识别"})
-        intent = await asyncio.to_thread(analyze_intent, req.message, last_context)
+        intent = await asyncio.to_thread(analyze_intent, req.message, last_context, is_generic_kb)
         t1_end = time.perf_counter()
         yield _sl({
             "t":"step","k":"intent","s":"done","title":"意图识别",
@@ -279,7 +293,10 @@ async def chat_stream(
         t2 = time.perf_counter()
         yield _sl({"t":"step","k":"retrieval","s":"pending","title":"混合检索"})
         search_query = intent.rewritten_query or req.message
-        hits = await asyncio.to_thread(search, search_query, None, 20, 200, 200)
+        hits = await asyncio.to_thread(
+            search, search_query, None, 20, 200, 200,
+            es_index=es_idx, milvus_collection=mv_col,
+        )
         t2_end = time.perf_counter()
         milvus_count = sum(1 for h in hits if h.rank_milvus != 999999)
         es_count = sum(1 for h in hits if h.rank_es != 999999)
@@ -293,8 +310,8 @@ async def chat_stream(
             "metrics": {
                 "milvus_hits": milvus_count, "es_hits": es_count,
                 "after_dedup": len(hits), "routing": routing,
-                "milvus_top_docs": [{"title": h.title_cn or "未知文献", "score": round(h.score_milvus, 3)} for h in milvus_docs],
-                "es_top_docs": [{"title": h.title_cn or "未知文献", "score": round(h.score_es, 3)} for h in es_docs],
+                "milvus_top_docs": [{"title": h.title or h.title_cn or "未知文献", "score": round(h.score_milvus, 3)} for h in milvus_docs],
+                "es_top_docs": [{"title": h.title or h.title_cn or "未知文献", "score": round(h.score_es, 3)} for h in es_docs],
                 "overlap": overlap,
             },
         })
@@ -304,8 +321,8 @@ async def chat_stream(
             "metrics": {
                 "milvus_hits": milvus_count, "es_hits": es_count,
                 "after_dedup": len(hits), "routing": routing,
-                "milvus_top_docs": [{"title": h.title_cn or "未知文献", "score": round(h.score_milvus, 3)} for h in milvus_docs],
-                "es_top_docs": [{"title": h.title_cn or "未知文献", "score": round(h.score_es, 3)} for h in es_docs],
+                "milvus_top_docs": [{"title": h.title or h.title_cn or "未知文献", "score": round(h.score_milvus, 3)} for h in milvus_docs],
+                "es_top_docs": [{"title": h.title or h.title_cn or "未知文献", "score": round(h.score_es, 3)} for h in es_docs],
                 "overlap": overlap,
             },
         }
@@ -338,7 +355,7 @@ async def chat_stream(
         yield _sl({"t":"step","k":"answer","s":"pending","title":"生成回答","elapsed_ms":0,"summary":"正在检索文献并生成回答..."})
         await asyncio.sleep(0)  # flush pending event before sync streaming loop
 
-        stream_gen = answer(req.message, reranked, history=history, intent=intent, top_n=5, stream=True)
+        stream_gen = answer(req.message, reranked, history=history, intent=intent, top_n=5, stream=True, is_generic=is_generic_kb)
         char_count = 0
         batch = ""
         for token in stream_gen:
@@ -381,22 +398,36 @@ async def chat_stream(
             },
         }
 
-        # Citations — 先查 ES L0 回填 title/journal
-        l0_meta = _fetch_l0_meta(reranked)
+        # Citations — 按 doc_id 去重，取前 5 篇不同文献
+        l0_meta = {} if is_generic_kb else _fetch_l0_meta(reranked)
         citations = []
-        for i, hit in enumerate(reranked[:5]):
-            if hit.content:
-                extra = l0_meta.get(hit.doc_id, {}) if hit.doc_id else {}
+        seen_docs: set[str] = set()
+        for hit in reranked:
+            if not hit.content or not hit.doc_id:
+                continue
+            if hit.doc_id in seen_docs:
+                continue
+            seen_docs.add(hit.doc_id)
+            if len(citations) >= 5:
+                break
+
+            extra = l0_meta.get(hit.doc_id, {}) if hit.doc_id else {}
+            if is_generic_kb:
+                title = hit.title or "未知文档"
+                journal = ""
+            else:
                 title = hit.title_cn or extra.get("title_cn") or "未知标题"
                 journal = hit.journal or extra.get("journal") or "中国全科医学"
-                c = CitationSchema(
-                    id=str(i + 1), title=title, source=journal,
-                    snippet=hit.content[:200] + ("..." if len(hit.content) > 200 else ""),
-                    doc_id=str(hit.doc_id) if hit.doc_id else None,
-                    relevance=hit.score_rerank,
-                )
-                citations.append(c)
-                yield _sl({"t":"cite", **c.model_dump()})
+            source = journal or "通用知识库"
+            idx = len(citations) + 1
+            c = CitationSchema(
+                id=str(idx), title=title, source=source,
+                snippet=hit.content[:200] + ("..." if len(hit.content) > 200 else ""),
+                doc_id=str(hit.doc_id),
+                relevance=hit.score_rerank,
+            )
+            citations.append(c)
+            yield _sl({"t":"cite", **c.model_dump()})
 
         # 保存 AI 消息
         ai_msg = Message(

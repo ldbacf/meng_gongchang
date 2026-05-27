@@ -20,6 +20,7 @@ from src.db import get_db
 from src.models import User
 from src.schemas import (
     LoginRequest,
+    RegisterRequest,
     LogoutRequest,
     RefreshRequest,
     TokenResponse,
@@ -85,6 +86,27 @@ async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
         refresh_token=new_refresh,
         user=UserResponse.model_validate(user),
     )
+
+
+@router.post("/register")
+async def register(
+    req: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    existing = await db.execute(select(User).where(User.username == req.username))
+    if existing.scalar_one_or_none():
+        raise HTTPException(400, "用户名已存在")
+
+    user = User(
+        username=req.username,
+        password_hash=hash_password(req.password),
+        role="user",
+        enabled=False,
+    )
+    db.add(user)
+    await db.commit()
+
+    return {"ok": True, "message": "注册成功，请等待管理员审核"}
 
 
 @router.post("/logout")

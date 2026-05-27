@@ -33,6 +33,7 @@ class SearchHit:
     doi: str = ""
     journal: str = ""
     title_cn: str = ""
+    title: str = ""
     section: str = ""
     article_type: str = ""
     heading_stack: list[str] = field(default_factory=list)
@@ -84,6 +85,7 @@ def _es_search(
     query: str,
     filters: dict | None = None,
     top_k: int = 200,
+    es_index: str | None = None,
 ) -> list[SearchHit]:
     es = _get_es()
 
@@ -110,7 +112,7 @@ def _es_search(
         "_source": True,
     }
 
-    resp = es.search(index=ES_INDEX, body=body)
+    resp = es.search(index=es_index or ES_INDEX, body=body)
 
     hits = []
     for i, hit in enumerate(resp["hits"]["hits"]):
@@ -145,11 +147,12 @@ def _milvus_search(
     embedding: list[float],
     filters: dict | None = None,
     top_k: int = 200,
+    milvus_collection: str | None = None,
 ) -> list[SearchHit]:
     from pymilvus import Collection
 
     _connect_milvus()
-    collection = Collection(MILVUS_COLLECTION)
+    collection = Collection(milvus_collection or MILVUS_COLLECTION)
     collection.load()
 
     # 构建表达式过滤
@@ -173,6 +176,13 @@ def _milvus_search(
         param={"metric_type": "COSINE", "nprobe": 16},
         limit=top_k,
         expr=expr,
+        output_fields=["chunk_id", "doc_id", "title"],
+    ) if milvus_collection and milvus_collection != MILVUS_COLLECTION else collection.search(
+        data=[embedding],
+        anns_field="embedding",
+        param={"metric_type": "COSINE", "nprobe": 16},
+        limit=top_k,
+        expr=expr,
         output_fields=["chunk_id", "doc_id", "level", "chunk_type", "doi", "title_cn"],
     )
 
@@ -185,6 +195,8 @@ def _milvus_search(
             level=fields.get("level", ""),
             chunk_type=fields.get("chunk_type", ""),
             doi=fields.get("doi", ""),
+            title=fields.get("title", ""),
+            title_cn=fields.get("title_cn", ""),
             score_milvus=hit.score,
             rank_milvus=rank + 1,
         )
@@ -228,6 +240,8 @@ def _rrf_fusion(
             merged[cid].html_body = hit.html_body
         if hit.heading_stack:
             merged[cid].heading_stack = hit.heading_stack
+        if hit.title:
+            merged[cid].title = hit.title
         if hit.title_cn:
             merged[cid].title_cn = hit.title_cn
         if hit.journal:
@@ -261,15 +275,20 @@ def search(
     top_k: int = 20,
     milvus_top_k: int = 200,
     es_top_k: int = 200,
+    es_index: str | None = None,
+    milvus_collection: str | None = None,
 ) -> list[SearchHit]:
     """
     双路召回 + RRF 融合。
 
     参数:
         query: 搜索文本
-        filters: 过滤条件，如 {"level": "L1", "section": "儿科最新文章合辑"}
+        filters: 过滤条件
         top_k: 最终返回数
-        milvus_top_k: Milvus 初召数（翻倍）
+        milvus_top_k: Milvus 初召数
+        es_top_k: ES 初召数
+        es_index: ES 索引名，默认用 config.ES_INDEX
+        milvus_collection: Milvus 集合名，默认用 config.MILVUS_COLLECTION
         es_top_k: ES 初召数（翻倍）
 
     返回:
@@ -278,8 +297,8 @@ def search(
     model = _get_embed_model()
     q_emb = model.embed_query(query)
 
-    m_hits = _milvus_search(q_emb, filters=filters, top_k=milvus_top_k)
-    e_hits = _es_search(query, filters=filters, top_k=es_top_k)
+    m_hits = _milvus_search(q_emb, filters=filters, top_k=milvus_top_k, milvus_collection=milvus_collection)
+    e_hits = _es_search(query, filters=filters, top_k=es_top_k, es_index=es_index)
 
     results = _rrf_fusion(m_hits, e_hits, top_k=top_k)
     return results

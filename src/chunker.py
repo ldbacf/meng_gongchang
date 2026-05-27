@@ -565,6 +565,34 @@ def _assemble_l0_chunk(doc_id: str, meta: dict) -> dict:
     }
 
 
+def _assemble_l0_chunk_generic(doc_id: str, title: str, elements: list[Element]) -> dict:
+    """通用文档级 chunk — 无期刊元数据，纯文件名 + 首个标题 + 前 3 段"""
+    first_heading = ""
+    paragraphs: list[str] = []
+    for el in elements:
+        if el.type == ElementType.HEADING and not first_heading:
+            first_heading = el.text
+        elif el.type == ElementType.PARAGRAPH and len(paragraphs) < 3:
+            p = el.text.strip()
+            if p:
+                paragraphs.append(p)
+
+    parts = [title]
+    if first_heading and first_heading != title:
+        parts.append(first_heading)
+    if paragraphs:
+        parts.append("\n\n".join(paragraphs))
+
+    return {
+        "chunk_id": f"{doc_id}__L0",
+        "doc_id": doc_id,
+        "level": ChunkLevel.L0,
+        "chunk_type": ChunkType.PAPER,
+        "title": title,
+        "content": "\n\n".join(parts),
+    }
+
+
 def _assemble_l1_chunks(
     doc_id: str,
     doi: str,

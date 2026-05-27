@@ -5,7 +5,8 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -16,11 +17,21 @@ class TaskStatus:
     PENDING = "pending"
     PROCESSING = "processing"
     PARSED = "parsed"
+    INDEXING = "indexing"
+    READY = "ready"
     FAILED = "failed"
 
 
-from sqlalchemy import ForeignKey, JSON
-from sqlalchemy.orm import relationship
+from sqlalchemy import JSON
+from sqlalchemy.dialects.postgresql import JSONB
+
+PIPELINE_STEPS_ORDER = ["upload", "mineru", "chunking", "embedding", "es_write", "milvus"]
+
+
+def default_pipeline_steps() -> dict:
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    return {s: {"status": "pending", "ts": now} for s in PIPELINE_STEPS_ORDER}
 
 
 class User(Base):
@@ -95,12 +106,35 @@ class Message(Base):
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
 
 
+class KnowledgeBase(Base):
+    __tablename__ = "knowledge_bases"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slug: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    es_index: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    milvus_collection: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    documents: Mapped[list["DocumentTask"]] = relationship(
+        back_populates="knowledge_base", cascade="all, delete-orphan"
+    )
+
+
 class DocumentTask(Base):
     __tablename__ = "document_tasks"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
+    kb_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("knowledge_bases.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    knowledge_base: Mapped[KnowledgeBase | None] = relationship(back_populates="documents")
     md5: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
     original_name: Mapped[str] = mapped_column(String(512), nullable=False)
     raw_minio_path: Mapped[str] = mapped_column(String(1024), nullable=False)
@@ -110,6 +144,7 @@ class DocumentTask(Base):
         String(32), default=TaskStatus.PENDING, nullable=False, index=True
     )
     batch_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    pipeline_steps: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

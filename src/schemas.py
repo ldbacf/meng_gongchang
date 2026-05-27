@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TaskCreateResponse(BaseModel):
@@ -34,6 +34,11 @@ class TaskStatusResponse(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=20)
+    password: str = Field(min_length=6, max_length=50)
 
 
 class UserResponse(BaseModel):
@@ -81,6 +86,7 @@ class UserCreateRequest(BaseModel):
 class ChatSendRequest(BaseModel):
     message: str
     conversation_id: str | None = None
+    kb_id: str | None = None
 
 
 class CitationSchema(BaseModel):
@@ -120,6 +126,39 @@ class ConversationResponse(BaseModel):
 
 class ConversationCreate(BaseModel):
     title: str = "新对话"
+
+
+# ── Knowledge Base ─────────────────────────────────────────
+
+class KBCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = None
+    slug: str = Field(min_length=2, max_length=50, pattern=r"^[a-z0-9_]+$")
+
+
+class KBResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str | None = None
+    slug: str
+    es_index: str
+    milvus_collection: str
+    created_at: datetime | None = None
+    document_count: int = 0
+    has_ready_docs: bool = False
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentResponse(BaseModel):
+    id: uuid.UUID
+    original_name: str
+    md5: str
+    status: str
+    kb_id: uuid.UUID | None = None
+    pipeline_steps: dict | None = None
+    created_at: datetime | None = None
+    error_msg: str | None = None
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Document / PDF ──────────────────────────────────────────

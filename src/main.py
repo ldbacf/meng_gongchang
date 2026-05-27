@@ -7,7 +7,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 
 import fitz  # PyMuPDF
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 
@@ -25,13 +25,26 @@ from src.schemas import TaskCreateResponse, TaskStatusResponse
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Manual migration: add kb_id column to existing document_tasks
+        await conn.run_sync(lambda c: c.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE document_tasks ADD COLUMN IF NOT EXISTS "
+                "kb_id UUID"
+            )
+        ))
+        await conn.run_sync(lambda c: c.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE document_tasks ADD COLUMN IF NOT EXISTS "
+                "pipeline_steps JSONB"
+            )
+        ))
     await init_buckets()
 
     # 创建默认管理员
     from sqlalchemy import func as sql_func  # noqa: F811
 
     async with async_session() as session:
-        from src.models import User
+        from src.models import KnowledgeBase, User
         from src.auth import hash_password
 
         result = await session.execute(
@@ -50,6 +63,38 @@ async def lifespan(app: FastAPI):
             print("[API] 已创建默认管理员: admin / admin123")
             print("[API] 请在首次登录后修改密码!")
 
+    # 创建默认知识库 + 回填现有文档
+    async with async_session() as session:
+        from src.models import KnowledgeBase, DocumentTask
+
+        kb_result = await session.execute(
+            select(KnowledgeBase).where(KnowledgeBase.slug == "zhong_guo_quan_ke")
+        )
+        kb = kb_result.scalar_one_or_none()
+        if not kb:
+            kb = KnowledgeBase(
+                name="中国全科医学",
+                description="《中国全科医学》期刊文献库，收录1248篇论文，覆盖高血压、糖尿病、心血管、慢性病管理等全科医学领域",
+                slug="zhong_guo_quan_ke",
+                es_index="chunks",
+                milvus_collection="chunks",
+            )
+            session.add(kb)
+            await session.commit()
+            await session.refresh(kb)
+            print(f"[API] 已创建默认知识库: {kb.name}")
+
+        # 回填现有文档
+        result = await session.execute(
+            select(DocumentTask).where(DocumentTask.kb_id.is_(None))
+        )
+        orphan_docs = result.scalars().all()
+        if orphan_docs:
+            for doc in orphan_docs:
+                doc.kb_id = kb.id
+            await session.commit()
+            print(f"[API] 已回填 {len(orphan_docs)} 份文档到默认知识库")
+
     # 预热 bge-m3 嵌入模型（启动时加载一次，后续常驻内存）
     from src.llm import get_embedding_model
     get_embedding_model()
@@ -57,7 +102,21 @@ async def lifespan(app: FastAPI):
     # 预热 KeyManager
     print("[API] KeyManager 启动:")
     print(get_key_manager().usage_report())
+
+    # 启动后台 Worker（MinerU 轮询 + 索引管线）
+    import asyncio
+    from src.worker import run_worker_background
+    _worker_stop = asyncio.Event()
+    _worker_task = asyncio.create_task(run_worker_background(_worker_stop))
+
     yield
+
+    _worker_stop.set()
+    _worker_task.cancel()
+    try:
+        await _worker_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(
@@ -170,7 +229,7 @@ async def _submit_batches(
 
 # ── 查重逻辑 ──────────────────────────────────────────────────
 
-async def _handle_one_file(file, session) -> tuple[TaskCreateResponse, dict | None]:
+async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateResponse, dict | None]:
     filename = file.filename or "unknown"
     content = await file.read()
     if not content:
@@ -185,7 +244,10 @@ async def _handle_one_file(file, session) -> tuple[TaskCreateResponse, dict | No
     existing = result.scalar_one_or_none()
 
     if existing:
+        if kb_id:
+            existing.kb_id = kb_id
         if existing.status == TaskStatus.PARSED and check_parsed_exists(file_md5):
+            await session.commit()
             return TaskCreateResponse(
                 id=existing.id, md5=existing.md5,
                 original_name=existing.original_name,
@@ -206,11 +268,18 @@ async def _handle_one_file(file, session) -> tuple[TaskCreateResponse, dict | No
         ), {"name": filename, "data": content, "md5": file_md5}
 
     # 新文件
+    from datetime import datetime as _dt, timezone as _tz
+    from src.models import default_pipeline_steps
+
     raw_path = upload_raw_pdf(file_md5, filename, content)
+    steps = default_pipeline_steps()
+    steps["upload"] = {"status": "done", "ts": _dt.now(_tz.utc).isoformat()}
     task = DocumentTask(
+        kb_id=kb_id,
         md5=file_md5, original_name=filename,
         raw_minio_path=f"{MINIO_RAW_BUCKET}/{raw_path}",
         status=TaskStatus.PENDING,
+        pipeline_steps=steps,
     )
     session.add(task)
     await session.commit()
@@ -231,10 +300,12 @@ from src.auth import get_current_user  # noqa: E402
 from src.routers.auth import router as auth_router  # noqa: E402
 from src.routers.chat import router as chat_router  # noqa: E402
 from src.routers.admin import router as admin_router  # noqa: E402
+from src.routers.ws import router as ws_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(admin_router)
+app.include_router(ws_router)
 
 
 # ── API 端点 ──────────────────────────────────────────────────
@@ -266,16 +337,22 @@ async def upload_document(file: UploadFile = File(...)):
 
 
 @app.post("/api/v1/documents/batch", response_model=list[TaskCreateResponse])
-async def upload_documents_batch(files: list[UploadFile] = File(...)):
+async def upload_documents_batch(
+    files: list[UploadFile] = File(...),
+    kb_id: str | None = Query(None),
+):
     if len(files) > CHUNK_SIZE:
         raise HTTPException(400, f"单次最多 {CHUNK_SIZE} 个文件")
+
+    import uuid as _uuid
+    _kb_id = _uuid.UUID(kb_id) if kb_id else None
 
     responses = []
     to_submit = []
 
     async with async_session() as session:
         for file in files:
-            resp, fi = await _handle_one_file(file, session)
+            resp, fi = await _handle_one_file(file, session, kb_id=_kb_id)
             responses.append(resp)
             if fi is not None:
                 to_submit.append(fi)
