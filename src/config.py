@@ -83,6 +83,9 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_INTENT_MODEL = os.getenv("DEEPSEEK_INTENT_MODEL", "deepseek-v4-flash")
 DEEPSEEK_ANSWER_MODEL = os.getenv("DEEPSEEK_ANSWER_MODEL", "deepseek-v4-pro")
 
+# ── 查询扩展 ────────────────────────────────────────────────
+USE_QUERY_EXPANSION = os.getenv("USE_QUERY_EXPANSION", "false").lower() == "true"
+
 # ── CORS ───────────────────────────────────────────────────
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
 

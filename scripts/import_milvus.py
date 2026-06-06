@@ -129,7 +129,7 @@ def _rows_from_file(filepath: Path, model) -> list[dict]:
             "journal":     _truncate(ch.get("journal", ""), "journal"),
             "section":     _truncate(ch.get("section", ""), "section"),
             "article_type": _truncate(ch.get("article_type", ""), "article_type"),
-            "title_cn":    _truncate(ch.get("title_cn", ""), "title_cn"),
+            "title_cn":    _truncate(ch.get("metadata", {}).get("title_cn", "") or ch.get("title_cn", ""), "title_cn"),
             "embedding":   emb.tolist(),
         })
 

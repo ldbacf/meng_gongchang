@@ -598,10 +598,13 @@ def _assemble_l1_chunks(
     doi: str,
     elements: list[Element],
     heading_stack: HeadingStack,
+    title_cn: str = "",
+    keywords_cn: str = "",
 ) -> list[dict]:
     """
     将元素列表中的段落按标题边界组装为 L1 chunk。
     同一标题下的所有段落合并为一个 chunk，过长时分段。
+    每个 chunk 的 content 前缀注入论文标题和关键词，提升 bge-m3 向量召回质量。
     """
     chunks: list[dict] = []
     hs = heading_stack
@@ -638,6 +641,10 @@ def _assemble_l1_chunks(
             "level": ChunkLevel.L1,
             "chunk_type": ChunkType.PARAGRAPH,
             "doi": doi,
+            "metadata": {
+                "title_cn": title_cn,
+                "keywords_cn": keywords_cn,
+            },
             "heading_stack": list(stack),
             "heading_depth": depth,
             "refers_to_tables": sorted(refs_t),
@@ -684,12 +691,14 @@ def _assemble_l2_table_chunks(
     md5: str,
     title_cn: str,
     tables: dict[int, TableInfo],
+    keywords_cn: str = "",
 ) -> list[dict]:
-    """组装 L2 表格 chunk"""
+    """组装 L2 表格 chunk — content 前缀注入标题+关键词以增强向量召回"""
     chunks: list[dict] = []
     title_short = title_cn[:40] if title_cn else ""
     for tn, info in tables.items():
         stack_str = _make_heading_stack_str(info.heading_stack)
+
         parts = [f"【章节】{stack_str}"] if stack_str else []
 
         for para in info.referring_paragraphs:
@@ -720,6 +729,10 @@ def _assemble_l2_table_chunks(
             "level": ChunkLevel.L2,
             "chunk_type": ChunkType.TABLE,
             "doi": doi,
+            "metadata": {
+                "title_cn": title_cn,
+                "keywords_cn": keywords_cn,
+            },
             "heading_stack": list(info.heading_stack),
             "heading_depth": len(info.heading_stack),
             "table_number": tn,
@@ -819,12 +832,13 @@ def chunk_document(
 
     # L1 — 章节级（需重新遍历，用新栈）
     hs2 = HeadingStack()
-    l1_chunks = _assemble_l1_chunks(doc_id, doi, elements, hs2)
+    title_cn = meta.get("title_cn", "")
+    keywords_cn = meta.get("keywords_cn", "")
+    l1_chunks = _assemble_l1_chunks(doc_id, doi, elements, hs2, title_cn=title_cn, keywords_cn=keywords_cn)
     chunks.extend(l1_chunks)
 
     # L2 — 表格级
-    title_cn = meta.get("title_cn", "")
-    l2_tables = _assemble_l2_table_chunks(doc_id, doi, md5, title_cn, tables)
+    l2_tables = _assemble_l2_table_chunks(doc_id, doi, md5, title_cn, tables, keywords_cn=keywords_cn)
     chunks.extend(l2_tables)
 
     if len(chunks) > 500:

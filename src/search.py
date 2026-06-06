@@ -90,6 +90,12 @@ def _es_search(
     es = _get_es()
 
     must_clauses = [{"match": {"content": query}}]
+    should_clauses = [
+        {"match": {"title_cn": {"query": query, "boost": 2.0}}},
+        {"match": {"keywords_cn": {"query": query, "boost": 1.5}}},
+        {"match": {"metadata.title_cn": {"query": query, "boost": 2.0}}},
+        {"match": {"metadata.keywords_cn": {"query": query, "boost": 1.5}}},
+    ]
     filter_clauses = []
 
     if filters:
@@ -106,6 +112,7 @@ def _es_search(
         "query": {
             "bool": {
                 "must": must_clauses,
+                "should": should_clauses,
                 "filter": filter_clauses,
             }
         },
@@ -213,7 +220,7 @@ def _milvus_search(
 def _rrf_fusion(
     m_hits: list[SearchHit],
     e_hits: list[SearchHit],
-    k: int = 60,
+    k: int = 20,
     top_k: int = 100,
 ) -> list[SearchHit]:
     """RRF 融合去重，按 score_rrf 降序"""
@@ -295,7 +302,9 @@ def search(
         list[SearchHit]，按 score_rrf 降序
     """
     model = _get_embed_model()
-    q_emb = model.embed_query(query)
+    # 短 query 重复嵌入以增强向量信号
+    embed_query = f"{query} {query}" if len(query) < 15 else query
+    q_emb = model.embed_query(embed_query)
 
     m_hits = _milvus_search(q_emb, filters=filters, top_k=milvus_top_k, milvus_collection=milvus_collection)
     e_hits = _es_search(query, filters=filters, top_k=es_top_k, es_index=es_index)
@@ -318,6 +327,8 @@ def search_with_intent(
     再用重写后的 query 做检索，最终返回 (hits, intent)。
     意图识别失败时降级为原始 query 直搜。
 
+    可通过环境变量 USE_QUERY_EXPANSION=true 启用口语→学术术语扩展。
+
     返回:
         (list[SearchHit], IntentResult)
     """
@@ -325,6 +336,18 @@ def search_with_intent(
 
     intent = analyze_intent(query)
     search_query = intent.rewritten_query or query
+
+    from src.config import USE_QUERY_EXPANSION
+
+    if USE_QUERY_EXPANSION:
+        from src.query_expansion import expand_query
+
+        expanded = expand_query(query)
+        if expanded and expanded != query and len(expanded) > 5:
+            search_query = f"{search_query} {expanded}"
+
+    hits = search(search_query, filters=filters, top_k=top_k, milvus_top_k=milvus_top_k, es_top_k=es_top_k)
+    return hits, intent
 
     hits = search(search_query, filters=filters, top_k=top_k, milvus_top_k=milvus_top_k, es_top_k=es_top_k)
     return hits, intent
@@ -389,6 +412,7 @@ def search_and_answer(
 ) -> "AnswerResult | Generator[str, None, None]":
     """
     一键式：意图识别 → 双路检索 → RRF 融合 → Rerank → LLM 回答。
+    可通过环境变量 USE_QUERY_EXPANSION=true 启用口语→学术术语扩展。
 
     参数:
         query: 用户查询
