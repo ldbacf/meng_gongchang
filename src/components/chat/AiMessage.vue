@@ -5,7 +5,7 @@ import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import RagPipelineSimple from './RagPipelineSimple.vue'
 import CitationSummary from './CitationSummary.vue'
-import { Sparkles, ChevronDown, AlertCircle } from 'lucide-vue-next'
+import { Sparkles, ChevronDown, AlertCircle, Copy, Check } from 'lucide-vue-next'
 
 const chatStore = useChatStore()
 
@@ -35,6 +35,17 @@ function handleContentClick(e: MouseEvent) {
   if (target?.dataset.citationId) {
     emit('citation-click', target.dataset.citationId)
   }
+}
+
+const copied = ref(false)
+
+async function copyContent() {
+  const text = props.isStreaming && props.streamContent !== undefined ? props.streamContent : props.message.content
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch { /* fallback */ }
 }
 
 const hasRagSteps = computed(() => {
@@ -106,7 +117,7 @@ onBeforeUnmount(() => {
 
 // ── Persistent expand toggle ──
 
-const ragExpanded = ref(localStorage.getItem('medrag_rag_expanded') === 'true')
+const ragExpanded = ref(localStorage.getItem('medrag_rag_expanded') !== 'false')
 function toggleRag() {
   ragExpanded.value = !ragExpanded.value
   localStorage.setItem('medrag_rag_expanded', String(ragExpanded.value))
@@ -114,7 +125,7 @@ function toggleRag() {
 </script>
 
 <template>
-  <div class="px-4 py-4">
+  <div class="group px-4 py-4">
     <div class="flex max-w-[85%] gap-3">
       <!-- Avatar -->
       <div
@@ -164,6 +175,18 @@ function toggleRag() {
             v-html="renderedContent"
             @click="handleContentClick"
           />
+
+          <!-- Copy button -->
+          <div class="mt-1 flex justify-end opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-hover:duration-100">
+            <button
+              class="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-primary-200 hover:text-slate-600 active:scale-90"
+              title="复制回答"
+              @click="copyContent"
+            >
+              <Check v-if="copied" :size="12" class="text-emerald-500" />
+              <Copy v-else :size="12" />
+            </button>
+          </div>
 
           <div
             v-if="isStreaming && !streamContent"

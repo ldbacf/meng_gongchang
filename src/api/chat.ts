@@ -40,11 +40,7 @@ function mapRagSteps(steps: Record<string, any> | null | undefined) {
   if (!steps) return undefined
   const result: Record<string, any> = {}
   for (const [key, val] of Object.entries(steps)) {
-    result[key] = {
-      status: val.status ?? 'completed',
-      title: val.title ?? key,
-      summary: val.summary,
-    }
+    result[key] = { ...val }
   }
   return result
 }
