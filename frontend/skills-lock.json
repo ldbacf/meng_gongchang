@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "agent-eyes": {
+      "source": "Mrxyy/agents-eyes",
+      "sourceType": "github",
+      "skillPath": "skills/agent-eyes/SKILL.md",
+      "computedHash": "28e16673257a3d2082fa7c76607cb32b66cb1149f85643b70b4837adcdc8504e"
+    }
+  }
+}
