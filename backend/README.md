@@ -62,6 +62,7 @@ backend/
 ├── scripts/                      # 数据处理脚本
 │   ├── scan_submit.py            # 文件夹扫描 → MinerU 批量提交
 │   ├── run_chunker.py            # 批量切分（断点续跑/失败隔离/原子写入）
+│   ├── backfill_document_tasks.py# 从 ES + MinIO 回填 document_tasks（预置文献）
 │   ├── download_model.py         # 下载 BGE-M3 模型
 │   ├── init_es.py                # ES 索引初始化（IK 分词器映射）
 │   ├── init_milvus.py            # Milvus Collection 初始化
@@ -186,6 +187,21 @@ API 文档地址：http://localhost:8000/docs
 ---
 
 ## 📄 PDF 文档处理完整流程
+
+### （可选）回填预置文献
+
+如果文献数据已通过其他渠道导入 ES / MinIO（即"预置文献"），可用此脚本把它们同步到 `document_tasks` 数据库表，使其在管理界面中可见并支持删除操作：
+
+```bash
+uv run python scripts/backfill_document_tasks.py
+```
+
+脚本逻辑：
+1. 从 ES `chunks` 索引扫描所有 L0 chunk，获取 `doc_id`、`md5`、`title_cn`
+2. 用 `md5` 在 MinIO `raw-docs` 桶中查找对应 PDF 路径
+3. 在 `document_tasks` 表创建状态为 `READY` 的记录，`batch_id` 字段存 ES 的 `doc_id`（删除时用于精准清理 ES / Milvus）
+
+> `batch_id` 的作用：预置文献在 ES 中以 `doc_id`（如 `"7597"`）而非 `md5` 标识，删除时系统会优先用 `batch_id` 定位并清除 ES / Milvus 中的所有 chunk。
 
 ### 阶段一：上传与解析
 

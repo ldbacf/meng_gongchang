@@ -117,6 +117,7 @@ medrag/
 │   ├── scripts/                # 数据处理脚本
 │   │   ├── scan_submit.py      # 批量扫描提交 PDF
 │   │   ├── run_chunker.py      # 批量切分
+│   │   ├── backfill_document_tasks.py # 回填预置文献到 document_tasks 表
 │   │   ├── init_es.py          # ES 索引初始化
 │   │   ├── init_milvus.py      # Milvus 集合初始化
 │   │   ├── import_es.py        # 导入切分结果 → ES
@@ -226,6 +227,14 @@ uv run python scripts/scan_submit.py
 
 # 启动后台 Worker 轮询解析结果
 uv run python -c "from src.worker import run_worker; run_worker()"
+```
+
+### 回填预置文献（可选）
+
+如果文献已通过其他渠道导入 ES / MinIO，用此脚本将其同步到 `document_tasks` 数据库表，使其在管理界面可见并支持删除：
+
+```bash
+uv run python scripts/backfill_document_tasks.py
 ```
 
 ### 文档切分 (Chunking)

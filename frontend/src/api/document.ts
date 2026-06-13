@@ -1,19 +1,16 @@
+import api from './index'
+
 export interface DocumentPdfResponse {
   pdf_url: string
   total_pages: number
 }
 
 export async function fetchDocumentPdfApi(docId: string): Promise<DocumentPdfResponse> {
-  const token = localStorage.getItem('access_token')
-  const res = await fetch(`/api/v1/documents/${docId}/pdf`, {
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  })
-  if (!res.ok) throw new Error(`Failed to fetch PDF info: ${res.status}`)
-  const data = await res.json()
+  const res = await api.get<{ pdf_url: string; total_pages: number }>(
+    `/v1/documents/${docId}/pdf`,
+  )
   return {
-    pdf_url: data.pdf_url,
-    total_pages: data.total_pages ?? 0,
+    pdf_url: res.data.pdf_url,
+    total_pages: res.data.total_pages ?? 0,
   }
 }

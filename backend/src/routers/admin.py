@@ -71,8 +71,11 @@ async def _submit_one_file(fi: dict, db: AsyncSession):
     await enqueue_batch(batch_id, md5_list, token=token)
 
 
-async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None) -> None:
-    """删除 ES 和 Milvus 中属于该文档的全部 chunk。"""
+async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None, task_batch_id: str | None = None) -> None:
+    """删除 ES 和 Milvus 中属于该文档的全部 chunk。
+    优先用 task_batch_id（预置文献的 ES doc_id），否则用 md5。
+    """
+    es_doc_id = task_batch_id or md5
     steps = pipeline_steps or {}
 
     # ES 清理
@@ -85,7 +88,7 @@ async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None) -> None:
                 es = _get_es()
                 es.delete_by_query(
                     index=es_index,
-                    body={"query": {"term": {"doc_id": md5}}},
+                    body={"query": {"term": {"doc_id": es_doc_id}}},
                     refresh=True,
                 )
             except Exception:
@@ -101,7 +104,7 @@ async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None) -> None:
                 from src.search import _connect_milvus
                 _connect_milvus()
                 col = Collection(mv_collection)
-                col.delete(f'doc_id == "{md5}"')
+                col.delete(f'doc_id == "{es_doc_id}"')
             except Exception:
                 pass
 
@@ -389,8 +392,9 @@ async def delete_document(
     md5 = task.md5
     steps = task.pipeline_steps
     kb_id = task.kb_id
+    batch_id = task.batch_id  # 预置文献存 ES doc_id
 
-    await _cleanup_es_milvus(md5, steps)
+    await _cleanup_es_milvus(md5, steps, task_batch_id=batch_id)
     await db.delete(task)
     await db.commit()
 
@@ -433,10 +437,10 @@ async def retry_document(
 
     now = datetime.now(timezone.utc).isoformat()
 
-    # 重置当前及后续步骤
+    # 重置当前及后续步骤，dict() 强制新对象触发 SQLAlchemy JSONB 脏跟踪
     for step in PIPELINE_STEPS_ORDER[PIPELINE_STEPS_ORDER.index(retry_from):]:
         steps[step] = {"status": "pending", "ts": now}
-    task.pipeline_steps = steps
+    task.pipeline_steps = dict(steps)
 
     if retry_from == "mineru":
         task.status = TaskStatus.PENDING
