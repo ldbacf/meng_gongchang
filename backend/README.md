@@ -203,6 +203,8 @@ uv run python scripts/backfill_document_tasks.py
 
 > `batch_id` 的作用：预置文献在 ES 中以 `doc_id`（如 `"7597"`）而非 `md5` 标识，删除时系统会优先用 `batch_id` 定位并清除 ES / Milvus 中的所有 chunk。
 
+> PDF 预览功能已改为后端代理模式，无需运行此脚本即可查看预置文献的 PDF。仅在需要对预置文献重新走解析流水线时才需要运行。
+
 ### 阶段一：上传与解析
 
 ```bash
@@ -303,6 +305,11 @@ curl -X POST http://localhost:8000/api/v1/chat/stream \
   -H "Authorization: Bearer <token>" \
   -d '{"query": "高血压的药物选择", "top_k": 10}' \
   --no-buffer
+
+# PDF 预览（后代理流，避免前端直连 MinIO 的 CORS 问题）
+curl http://localhost:8000/api/v1/documents/{doc_id}/pdf/stream \
+  -H "Authorization: Bearer <token>" \
+  --output preview.pdf
 ```
 
 ---

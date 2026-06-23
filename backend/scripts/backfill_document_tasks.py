@@ -18,7 +18,7 @@ from src.config import ES_HOST, ES_PORT, MINIO_RAW_BUCKET
 from src.models import DocumentTask, KnowledgeBase, TaskStatus, default_pipeline_steps
 from src.minio_client import get_minio
 
-es = Elasticsearch(f"http://{ES_HOST}:{ES_PORT}")
+es = Elasticsearch(f"http://{ES_HOST}:{ES_PORT}", request_timeout=30)
 mc = get_minio()
 
 

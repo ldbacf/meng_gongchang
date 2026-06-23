@@ -3,7 +3,7 @@ import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import type { Citation } from '@/types'
-import { fetchDocumentPdfApi } from '@/api/document'
+import { fetchDocumentPdfStreamUrl } from '@/api/document'
 import { useSSE } from '@/composables/useSSE'
 import { useToastStore } from '@/stores/toast'
 import { useAdminStore } from '@/stores/admin'
@@ -63,8 +63,7 @@ async function loadPdfForCitation(citation: Citation) {
 
   try {
     if (citation.doc_id) {
-      const res = await fetchDocumentPdfApi(citation.doc_id)
-      pdfUrl.value = res.pdf_url
+      pdfUrl.value = fetchDocumentPdfStreamUrl(citation.doc_id)
     } else if (citation.pdfUrl) {
       pdfUrl.value = citation.pdfUrl
     }

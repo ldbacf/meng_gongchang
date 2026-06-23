@@ -57,9 +57,10 @@ from src.config import ES_HOST, ES_PORT, ES_USER, ES_PASSWORD, ES_INDEX
 
 
 def _get_es() -> Elasticsearch:
+    kwargs = {"request_timeout": 30}
     if ES_USER and ES_PASSWORD:
-        return Elasticsearch(f"http://{ES_USER}:{ES_PASSWORD}@{ES_HOST}:{ES_PORT}")
-    return Elasticsearch(f"http://{ES_HOST}:{ES_PORT}")
+        return Elasticsearch(f"http://{ES_USER}:{ES_PASSWORD}@{ES_HOST}:{ES_PORT}", **kwargs)
+    return Elasticsearch(f"http://{ES_HOST}:{ES_PORT}", **kwargs)
 
 
 def _scan_json_files(data_dir: Path, limit: int | None = None) -> list[Path]:

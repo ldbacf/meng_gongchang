@@ -169,6 +169,7 @@ npm run preview
 ### PDF 预览 (`PdfViewer.vue`)
 
 - 基于 pdfjs-dist 的内嵌 PDF 查看器
+- 通过后端代理接口 `/api/v1/documents/{doc_id}/pdf/stream` 获取 PDF，避免前端直连 MinIO 的 CORS 问题
 - 支持翻页、缩放
 - 可从引用卡片跳转到指定页面
 
@@ -215,6 +216,10 @@ form.append('file', file)
 await api.post('/v1/documents/upload', form, {
   headers: { 'Content-Type': 'multipart/form-data' },
 })
+
+// PDF 预览（后端代理 URL，直接传给 PdfViewer 组件）
+import { fetchDocumentPdfStreamUrl } from '@/api/document'
+const pdfUrl = fetchDocumentPdfStreamUrl(docId)  // → /api/v1/documents/{docId}/pdf/stream
 ```
 
 ### SSE 流式连接 (`useSSE.ts`)
@@ -255,7 +260,7 @@ connect({ query: '高血压用药', top_k: 10 })
 | `MessageBubble.vue`  | 单条消息气泡（用户/AI 区分）     |
 | `CitationCard.vue`   | 单条文献引用卡片                 |
 | `CitationSummary.vue`| 引用来源汇总列表                 |
-| `PdfViewer.vue`      | 内嵌 PDF 查看器                  |
+| `PdfViewer.vue`      | 内嵌 PDF 查看器（后端代理模式）  |
 | `RightPanel.vue`     | 右侧信息面板（引用/PDF）        |
 
 ### 通用组件

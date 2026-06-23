@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import fitz  # PyMuPDF
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
 from src.config import CHUNK_SIZE, CORS_ORIGINS, MINIO_RAW_BUCKET, MINERU_BATCH_SIZE
@@ -577,6 +578,118 @@ def _build_pdf_response(task):
         "pdf_url": presigned,
         "total_pages": 0,
     }
+
+
+def _find_pdf_object_path(doc_id: str) -> tuple[str, str] | None:
+    """查找 PDF 在 MinIO 中的位置，返回 (bucket, object_path) 或 None"""
+    from src.config import ES_INDEX, MINIO_RAW_BUCKET
+    from src.minio_client import get_minio
+
+    client = get_minio()
+
+    # 方案 A: 通过 DocumentTask 查找
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    # 同步方式查 DocumentTask
+    from src.db import async_session as _async_session
+    from src.models import DocumentTask as _DT
+
+    async def _query_task():
+        async with _async_session() as session:
+            task = None
+            try:
+                uid = uuid.UUID(doc_id)
+            except ValueError:
+                uid = None
+            if uid:
+                result = await session.execute(select(_DT).where(_DT.id == uid))
+                task = result.scalar_one_or_none()
+            if not task:
+                result = await session.execute(select(_DT).where(_DT.md5 == doc_id))
+                task = result.scalar_one_or_none()
+            if not task:
+                result = await session.execute(select(_DT).where(_DT.md5.startswith(doc_id)).limit(1))
+                task = result.scalar_one_or_none()
+            return task
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            task = pool.submit(asyncio.run, _query_task()).result()
+    else:
+        task = asyncio.run(_query_task())
+
+    if task and task.raw_minio_path:
+        if task.raw_minio_path.startswith(f"{MINIO_RAW_BUCKET}/"):
+            object_path = task.raw_minio_path[len(f"{MINIO_RAW_BUCKET}/"):]
+        else:
+            object_path = task.raw_minio_path
+        return (MINIO_RAW_BUCKET, object_path)
+
+    # 方案 B: 直接从 MinIO 扫描
+    for prefix in (f"{doc_id}/", doc_id):
+        for obj in client.list_objects(MINIO_RAW_BUCKET, prefix=prefix, recursive=True):
+            if obj.object_name.endswith(".pdf"):
+                return (MINIO_RAW_BUCKET, obj.object_name)
+
+    # 方案 C: 查 ES L0 chunk 反拿 md5
+    try:
+        from src.search import _get_es
+        es = _get_es()
+        resp = es.search(
+            index=ES_INDEX,
+            body={
+                "size": 1,
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"doc_id": doc_id}},
+                            {"term": {"level": "L0"}},
+                        ]
+                    }
+                },
+                "_source": ["md5"],
+            },
+        )
+        hits = resp.get("hits", {}).get("hits", [])
+        if hits:
+            md5 = hits[0]["_source"].get("md5")
+            if md5:
+                for obj in client.list_objects(MINIO_RAW_BUCKET, prefix=f"{md5}/", recursive=True):
+                    if obj.object_name.endswith(".pdf"):
+                        return (MINIO_RAW_BUCKET, obj.object_name)
+    except Exception:
+        pass
+
+    return None
+
+
+@app.get("/api/v1/documents/{doc_id}/pdf/stream")
+async def stream_document_pdf(
+    doc_id: str,
+    user=Depends(get_current_user),
+):
+    """代理返回 PDF 文件流，避免前端直接访问 MinIO 的 CORS 问题"""
+    result = _find_pdf_object_path(doc_id)
+    if not result:
+        raise HTTPException(404, f"文档不存在: {doc_id}")
+
+    bucket, object_path = result
+    client = get_minio()
+    try:
+        response = client.get_object(bucket, object_path)
+    except Exception:
+        raise HTTPException(404, f"PDF 文件读取失败: {doc_id}")
+
+    return StreamingResponse(
+        response.stream(32 * 1024),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{doc_id}.pdf"'},
+    )
 
 
 @app.get("/health")

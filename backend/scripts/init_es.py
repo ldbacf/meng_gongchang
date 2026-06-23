@@ -62,11 +62,13 @@ MAPPINGS = {
 
 
 def _get_es_client() -> Elasticsearch:
+    kwargs = {"request_timeout": 30}
     if ES_USER and ES_PASSWORD:
         return Elasticsearch(
             f"http://{ES_USER}:{ES_PASSWORD}@{ES_HOST}:{ES_PORT}",
+            **kwargs,
         )
-    return Elasticsearch(f"http://{ES_HOST}:{ES_PORT}")
+    return Elasticsearch(f"http://{ES_HOST}:{ES_PORT}", **kwargs)
 
 
 def main():

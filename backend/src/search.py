@@ -59,12 +59,14 @@ def _get_es():
     global _ES_CLIENT
     if _ES_CLIENT is None:
         from elasticsearch import Elasticsearch
+        kwargs = {"request_timeout": 30}
         if ES_USER and ES_PASSWORD:
             _ES_CLIENT = Elasticsearch(
                 f"http://{ES_USER}:{ES_PASSWORD}@{ES_HOST}:{ES_PORT}",
+                **kwargs,
             )
         else:
-            _ES_CLIENT = Elasticsearch(f"http://{ES_HOST}:{ES_PORT}")
+            _ES_CLIENT = Elasticsearch(f"http://{ES_HOST}:{ES_PORT}", **kwargs)
     return _ES_CLIENT
 
 
