@@ -14,8 +14,3 @@ export async function fetchDocumentPdfApi(docId: string): Promise<DocumentPdfRes
     total_pages: res.data.total_pages ?? 0,
   }
 }
-
-/** 返回后端代理 PDF 流的 URL（避免前端直连 MinIO 的 CORS 问题） */
-export function fetchDocumentPdfStreamUrl(docId: string): string {
-  return `/api/v1/documents/${docId}/pdf/stream`
-}

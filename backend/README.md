@@ -94,7 +94,35 @@ backend/
 - Docker & Docker Compose
 - CUDA 设备（可选，用于 BGE-M3 编码）
 
-### 1. 启动基础设施
+### 1. 配置环境变量
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env` 文件，**必填项**：
+
+```ini
+# ── JWT 密钥（必须！否则后端无法启动）──
+JWT_SECRET_KEY=your-random-secret-please-change
+```
+
+**选填项**（按需填入 API Key）：
+
+```ini
+# ── DeepSeek（意图识别 + LLM 回答，无 Key 则 RAG 问答不可用）──
+DEEPSEEK_API_KEY=sk-your-key-here
+
+# ── 硅基流动（Reranker 精排，无 Key 则跳过精排步骤）──
+SILICONFLOW_API_KEY=sk-your-key-here
+
+# ── MinerU（PDF 解析，无 Key 则只能检索现有数据，不能上传新 PDF）──
+MINERU_TOKENS=token1,token2,token3
+```
+
+> `MINERU_TOKENS` 支持多个 Token 逗号分隔，系统自动轮询并在额度用完后切换。
+
+### 2. 启动基础设施
 
 ```bash
 docker compose up -d
@@ -126,30 +154,6 @@ open http://localhost:8000
 open http://localhost:5601
 ```
 
-### 2. 配置环境变量
-
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 文件，填入必要的 API Key：
-
-```ini
-# ── DeepSeek（意图识别 + LLM 回答）──
-DEEPSEEK_API_KEY=sk-your-key-here
-DEEPSEEK_INTENT_MODEL=deepseek-v4-flash
-DEEPSEEK_ANSWER_MODEL=deepseek-v4-pro
-
-# ── 硅基流动（Reranker）──
-SILICONFLOW_API_KEY=sk-your-key-here
-SILICONFLOW_RERANK_MODEL=Qwen/Qwen3-Reranker-4B
-
-# ── MinerU（PDF 解析，可选）──
-MINERU_TOKENS=token1,token2,token3
-```
-
-> `MINERU_TOKENS` 支持多个 Token 逗号分隔，系统自动轮询并在额度用完后切换。
-
 ### 3. 安装依赖
 
 ```bash
@@ -158,19 +162,31 @@ conda activate rag_test   # 或自己创建环境
 uv sync
 ```
 
-### 4. 初始化索引
+### 4. 初始化索引（★ 必做，否则 ES / Milvus 查询会报错）
 
 ```bash
 uv run python scripts/init_es.py       # 创建 ES 索引（ik_smart 分词）
 uv run python scripts/init_milvus.py   # 创建 Milvus Collection
 ```
 
-### 5. 下载向量模型（可选）
+### 5. 回填预置文献数据（可选，看使用场景）
+
+完成第 4 步后，你处于以下两种场景之一：
+
+| 场景 | 是否需要回填 | 说明 |
+|------|-------------|------|
+| 📦 接手已有数据（ES / MinIO 里已有 chunks） | ✅ 需要 | 运行 `backfill_document_tasks.py` |
+| 🆕 从零开始（没有预置数据） | ❌ 不需要 | 直接跳到第 6 步 |
 
 ```bash
-uv run python scripts/download_model.py
-# 模型文件会下载到 models/ 目录
+# 📦 场景一：接手已有数据，回填 document_tasks 表
+# ES / MinIO 里已有文献 chunk（如通过 git clone 或数据迁移拿到）
+uv run python scripts/backfill_document_tasks.py
 ```
+
+> `backfill_document_tasks.py` 做了什么：扫描 ES 中所有 L0 chunk → 用 md5 去 MinIO 找 PDF → 在 `document_tasks` 表创建记录。这些记录用于管理界面展示和 PDF 预览流的路径定位。
+
+> `batch_id` 的作用：预置文献在 ES 中以 `doc_id`（如 `"7597"`）而非 `md5` 标识，删除时系统会优先用 `batch_id` 定位并清除 ES / Milvus 中的所有 chunk。
 
 ### 6. 启动 API 服务
 
@@ -183,6 +199,15 @@ uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 API 文档地址：http://localhost:8000/docs
+
+### 首次使用
+
+1. 访问 `http://localhost:3000`（前端）或 `http://localhost:8000/docs`（API）
+2. 注册管理员账号（通过 API: `POST /api/v1/auth/register`）
+3. 在数据库中将该用户 role 改为 `admin`、enabled 改为 `true`
+4. 登录后即可使用
+
+> 注册后账号默认为禁用状态（`enabled=false`），需要管理员手动启用。
 
 ---
 
@@ -202,8 +227,6 @@ uv run python scripts/backfill_document_tasks.py
 3. 在 `document_tasks` 表创建状态为 `READY` 的记录，`batch_id` 字段存 ES 的 `doc_id`（删除时用于精准清理 ES / Milvus）
 
 > `batch_id` 的作用：预置文献在 ES 中以 `doc_id`（如 `"7597"`）而非 `md5` 标识，删除时系统会优先用 `batch_id` 定位并清除 ES / Milvus 中的所有 chunk。
-
-> PDF 预览功能已改为后端代理模式，无需运行此脚本即可查看预置文献的 PDF。仅在需要对预置文献重新走解析流水线时才需要运行。
 
 ### 阶段一：上传与解析
 
@@ -305,11 +328,6 @@ curl -X POST http://localhost:8000/api/v1/chat/stream \
   -H "Authorization: Bearer <token>" \
   -d '{"query": "高血压的药物选择", "top_k": 10}' \
   --no-buffer
-
-# PDF 预览（后代理流，避免前端直连 MinIO 的 CORS 问题）
-curl http://localhost:8000/api/v1/documents/{doc_id}/pdf/stream \
-  -H "Authorization: Bearer <token>" \
-  --output preview.pdf
 ```
 
 ---

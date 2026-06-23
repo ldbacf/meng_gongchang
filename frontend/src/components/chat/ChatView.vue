@@ -3,10 +3,11 @@ import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import type { Citation } from '@/types'
-import { fetchDocumentPdfStreamUrl } from '@/api/document'
+
 import { useSSE } from '@/composables/useSSE'
 import { useToastStore } from '@/stores/toast'
 import { useAdminStore } from '@/stores/admin'
+import api from '@/api'
 import ChatInput from './ChatInput.vue'
 import MessageBubble from './MessageBubble.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -40,6 +41,7 @@ const streamMessageWithRagSteps = computed(() => ({
 const rightPanelOpen = ref(false)
 const activeCitation = ref<Citation | null>(null)
 const pdfUrl = ref<string | null>(null)
+let _currentBlobUrl: string | null = null
 const pdfLoading = ref(false)
 const showBackButton = ref(false)
 
@@ -55,20 +57,37 @@ const uniqueCitations = computed(() => {
   return Array.from(map.values())
 })
 
+function _setPdfUrl(url: string | null) {
+  if (_currentBlobUrl) {
+    URL.revokeObjectURL(_currentBlobUrl)
+    _currentBlobUrl = null
+  }
+  pdfUrl.value = url
+}
+
 async function loadPdfForCitation(citation: Citation) {
   activeCitation.value = citation
   rightPanelOpen.value = true
   pdfLoading.value = true
-  pdfUrl.value = null
+  _setPdfUrl(null)
 
   try {
     if (citation.doc_id) {
-      pdfUrl.value = fetchDocumentPdfStreamUrl(citation.doc_id)
+      // 用带 token 的 api 实例请求 PDF 流，转为 blob URL 供 PdfViewer 渲染
+      const response = await api.get(`/v1/documents/${citation.doc_id}/pdf/stream`, {
+        responseType: 'blob',
+      })
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const blobUrl = URL.createObjectURL(blob)
+      _currentBlobUrl = blobUrl
+      pdfUrl.value = blobUrl
+      pdfLoading.value = false
+      return
     } else if (citation.pdfUrl) {
-      pdfUrl.value = citation.pdfUrl
+      _setPdfUrl(citation.pdfUrl)
     }
   } catch {
-    pdfUrl.value = citation.pdfUrl ?? null
+    _setPdfUrl(citation.pdfUrl ?? null)
   } finally {
     pdfLoading.value = false
   }
@@ -85,19 +104,19 @@ async function handleCitationClick(citationId: string) {
 function showCitationList() {
   showBackButton.value = true
   activeCitation.value = null
-  pdfUrl.value = null
+  _setPdfUrl(null)
   rightPanelOpen.value = true
 }
 
 function closeRightPanel() {
   rightPanelOpen.value = false
   activeCitation.value = null
-  pdfUrl.value = null
+  _setPdfUrl(null)
 }
 
 function goBackToList() {
   activeCitation.value = null
-  pdfUrl.value = null
+  _setPdfUrl(null)
 }
 
 function handlePanelSelectCitation(citation: Citation) {

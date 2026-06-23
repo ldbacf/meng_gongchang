@@ -237,8 +237,6 @@ uv run python -c "from src.worker import run_worker; run_worker()"
 uv run python scripts/backfill_document_tasks.py
 ```
 
-> PDF 预览功能已改为后端代理模式，无需运行此脚本即可查看预置文献的 PDF。仅在需要对预置文献重新走解析流水线时才需要运行。
-
 ### 文档切分 (Chunking)
 
 三粒度分层切分:
@@ -329,7 +327,7 @@ uv run python test/test_embedding_compat.py
 
 - **对话界面** — 类 ChatGPT 交互式问答，支持流式 SSE 输出
 - **文献引用** — 回答结果附带文献引用卡片，点击可查看原文
-- **PDF 预览** — 后端代理 PDF 流，内嵌 PDF 查看器，定位到引用位置
+- **PDF 预览** — 内嵌 PDF 查看器，定位到引用位置
 - **用户认证** — JWT 登录 + Token 自动刷新
 - **用户管理** — 后台用户管理面板
 - **响应式布局** — 可折叠侧栏，桌面/移动端自适应
