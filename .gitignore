@@ -19,3 +19,5 @@ Thumbs.db
 # ── Project ──
 .env
 node_modules/
+
+docs/

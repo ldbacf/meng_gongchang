@@ -65,7 +65,7 @@ async def blacklist_token(token: str) -> None:
         return
     try:
         from src.redis_client import get_redis
-        r = get_redis()
+        r = await get_redis()
         await r.setex(f"blacklist:{token}", ttl, "1")
     except Exception:
         pass  # Redis 不可用时静默跳过
@@ -74,7 +74,7 @@ async def blacklist_token(token: str) -> None:
 async def is_token_blacklisted(token: str) -> bool:
     try:
         from src.redis_client import get_redis
-        r = get_redis()
+        r = await get_redis()
         return await r.exists(f"blacklist:{token}") > 0
     except Exception:
         return False  # Redis 不可用时跳过黑名单检查
