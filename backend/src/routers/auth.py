@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,7 @@ from src.auth import (
     verify_password,
 )
 from src.db import get_db
+from src.log_service import log_operation
 from src.models import User
 from src.schemas import (
     LoginRequest,
@@ -31,16 +32,62 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(
+    req: LoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(User).where(User.username == req.username))
     user = result.scalar_one_or_none()
-    if not user or not verify_password(req.password, user.password_hash):
-        raise HTTPException(401, "用户名或密码错误")
-    if not user.enabled:
-        raise HTTPException(403, "账号已被禁用")
 
-    user.last_login = datetime.now(timezone.utc)
+    if not user or not verify_password(req.password, user.password_hash):
+        await log_operation(
+            operator=user,
+            action="auth.login_failed",
+            target_type="user",
+            target_label=f"用户 {req.username}",
+            detail="用户名或密码错误",
+            request=request,
+        )
+        raise HTTPException(401, "用户名或密码错误")
+
+    now = datetime.now(timezone.utc)
+
+    # 惰性解封：封禁到期后首次登录自动恢复，不需要定时任务
+    if user.banned_until and user.banned_until <= now:
+        user.enabled = True
+        user.banned_until = None
+        await db.commit()
+
+    if not user.enabled:
+        blocked_label = (
+            f"账号已被封禁，解封时间 {user.banned_until:%Y-%m-%d %H:%M}"
+            if user.banned_until
+            else "账号已被禁用"
+        )
+        await log_operation(
+            operator=user,
+            action="auth.login_failed",
+            target_type="user",
+            target_label=f"用户 {req.username}",
+            detail=blocked_label,
+            request=request,
+        )
+        raise HTTPException(403, blocked_label)
+
+    user.last_login = now
+    user.last_active_at = now
     await db.commit()
+
+    await log_operation(
+        operator=user,
+        action="auth.login",
+        target_type="user",
+        target_id=user.id,
+        target_label=f"用户 {user.username}",
+        detail=f"角色 {user.role}",
+        request=request,
+    )
 
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))

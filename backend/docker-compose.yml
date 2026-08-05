@@ -135,7 +135,7 @@ services:
     container_name: mineru-attu
     restart: unless-stopped
     ports:
-      - "8000:3000"
+      - "8002:3000"   # 宿主 8000 让给后端 API，attu GUI 改到 8002
     environment:
       - MILVUS_URL=milvus:19530
     depends_on:

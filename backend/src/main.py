@@ -3,8 +3,8 @@
 import hashlib
 import traceback
 import uuid
-from collections import defaultdict
-from contextlib import asynccontextmanager
+from collections import defaultdict #带默认值的字典，提前输入字典
+from contextlib import asynccontextmanager #异步上下文管理器
 
 import fitz  # PyMuPDF
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
@@ -19,15 +19,19 @@ from src.minio_client import check_parsed_exists, get_minio, init_buckets, uploa
 from src.models import Base, DocumentTask, TaskStatus
 from src.redis_client import enqueue_batch
 from src.schemas import TaskCreateResponse, TaskStatusResponse
+#################################################################################################
+#注释
+#################################################################################################
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+async def lifespan(app: FastAPI):#创建数据库表
+    async with engine.begin() as conn:#数据库连接引擎
+        await conn.run_sync(Base.metadata.create_all)        # 创建所有表（如果不存在），但不会修改已有表结构
+
         # Manual migration: add kb_id column to existing document_tasks
         await conn.run_sync(lambda c: c.execute(
-            __import__("sqlalchemy").text(
+            __import__("sqlalchemy").text(#初始化时迁移字段
                 "ALTER TABLE document_tasks ADD COLUMN IF NOT EXISTS "
                 "kb_id UUID"
             )
@@ -38,7 +42,23 @@ async def lifespan(app: FastAPI):
                 "pipeline_steps JSONB"
             )
         ))
-    await init_buckets()
+
+        # Manual migration: 管理端新增字段。
+        # 注意 create_all 只建不存在的表，不会给已存在的 users 表加列，
+        # 所以这里必须显式 ALTER TABLE（表里已有数据）。
+        for _sql in (
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until TIMESTAMPTZ",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email "
+            "ON users (email) WHERE email IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS ix_users_last_active "
+            "ON users (last_active_at DESC NULLS LAST)",
+        ):
+            await conn.run_sync(
+                lambda c, s=_sql: c.execute(__import__("sqlalchemy").text(s))
+            )
+    await init_buckets()#初始化 MinIO 存储桶，存储二进制（PDF和解析后的MarkDOwn文件）
 
     # 创建默认管理员
     from sqlalchemy import func as sql_func  # noqa: F811
@@ -300,10 +320,14 @@ from src.auth import get_current_user  # noqa: E402
 from src.routers.auth import router as auth_router  # noqa: E402
 from src.routers.chat import router as chat_router  # noqa: E402
 from src.routers.admin import router as admin_router  # noqa: E402
+from src.routers.admin_stats import router as admin_stats_router  # noqa: E402
 from src.routers.ws import router as ws_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(chat_router)
+# admin_stats 必须在 admin 之前注册：
+# 它有 GET /admin/users（分页版），若 admin 先注册会与之冲突
+app.include_router(admin_stats_router)
 app.include_router(admin_router)
 app.include_router(ws_router)
 

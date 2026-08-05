@@ -2,15 +2,16 @@
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth import hash_password, require_admin
 from src.config import MINIO_RAW_BUCKET
 from src.db import get_db
+from src.log_service import log_operation
 from src.minio_client import upload_raw_pdf
 from src.models import (
     DocumentTask,
@@ -113,21 +114,13 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 
 # ── 用户管理 ────────────────────────────────────────────────
-
-
-@router.get("/users", response_model=list[UserResponse])
-async def list_users(
-    _admin=Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(select(User).order_by(User.created_at))
-    return [UserResponse.model_validate(u) for u in result.scalars().all()]
-
+# 注意：GET /users 已迁移到 admin_stats.py（分页 + 搜索 + email/chats/kbCalls）
 
 @router.post("/users", response_model=UserResponse, status_code=201)
 async def create_user(
     req: UserCreateRequest,
-    _admin=Depends(require_admin),
+    request: Request,
+    admin=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     existing = await db.execute(select(User).where(User.username == req.username))
@@ -138,10 +131,21 @@ async def create_user(
         username=req.username,
         password_hash=hash_password(req.password),
         role=req.role,
+        email=req.email or None,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    await log_operation(
+        operator=admin,
+        action="user.create",
+        target_type="user",
+        target_id=user.id,
+        target_label=f"用户 {user.username}",
+        detail=f"角色 {user.role}",
+        request=request,
+    )
     return UserResponse.model_validate(user)
 
 
@@ -149,7 +153,8 @@ async def create_user(
 async def update_user(
     user_id: uuid.UUID,
     req: UserUpdateRequest,
-    _admin=Depends(require_admin),
+    request: Request,
+    admin=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(User).where(User.id == user_id))
@@ -157,33 +162,115 @@ async def update_user(
     if not user:
         raise HTTPException(404, "用户不存在")
 
-    if req.enabled is not None and _admin.id == user.id:
+    if req.enabled is False and admin.id == user.id:
         raise HTTPException(400, "不能禁用自己")
+
+    was_enabled = user.enabled
+    was_role = user.role
 
     if req.enabled is not None:
         user.enabled = req.enabled
+        if not req.enabled:
+            # 封禁：有 banned_until 就是限时封禁，否则永久
+            user.banned_until = req.banned_until
+        else:
+            # 解封：清掉到期时间
+            user.banned_until = None
+    elif req.clear_banned_until:
+        user.banned_until = None
+    elif req.banned_until is not None:
+        user.banned_until = req.banned_until
+
     if req.role is not None:
         user.role = req.role
 
     await db.commit()
     await db.refresh(user)
+
+    # ── 审计日志：一次请求最多记 1 条，按优先级取主操作 ──
+    if was_enabled and not user.enabled:
+        if user.banned_until:
+            days = max(
+                1,
+                round(
+                    (user.banned_until - datetime.now(timezone.utc)).total_seconds()
+                    / 86400
+                ),
+            )
+            detail = f"限时封禁，约 {days} 天后自动解封"
+        else:
+            detail = "永久封禁"
+        await log_operation(
+            operator=admin,
+            action="user.ban",
+            target_type="user",
+            target_id=user.id,
+            target_label=f"用户 {user.username}",
+            detail=detail,
+            request=request,
+        )
+    elif not was_enabled and user.enabled:
+        await log_operation(
+            operator=admin,
+            action="user.unban",
+            target_type="user",
+            target_id=user.id,
+            target_label=f"用户 {user.username}",
+            detail="已恢复登录权限",
+            request=request,
+        )
+    elif was_role != user.role:
+        await log_operation(
+            operator=admin,
+            action="user.role_change",
+            target_type="user",
+            target_id=user.id,
+            target_label=f"用户 {user.username}",
+            detail=f"角色 {was_role} → {user.role}",
+            request=request,
+        )
+    elif req.banned_until is not None:
+        await log_operation(
+            operator=admin,
+            action="user.ban",
+            target_type="user",
+            target_id=user.id,
+            target_label=f"用户 {user.username}",
+            detail=f"更新封禁到期时间至 {user.banned_until:%Y-%m-%d %H:%M}",
+            request=request,
+        )
+
     return UserResponse.model_validate(user)
 
 
 @router.delete("/users/{user_id}")
 async def delete_user(
     user_id: uuid.UUID,
-    _admin=Depends(require_admin),
+    request: Request,
+    admin=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(404, "用户不存在")
-    if _admin.id == user.id:
+    if admin.id == user.id:
         raise HTTPException(400, "不能删除自己")
+
+    deleted_username = user.username
+    deleted_role = user.role
     await db.delete(user)
     await db.commit()
+
+    await log_operation(
+        operator=admin,
+        action="user.delete",
+        target_type="user",
+        target_id=user_id,
+        target_label=f"用户 {deleted_username}",
+        detail=f"角色 {deleted_role}",
+        request=request,
+    )
     return {"ok": True}
 
 
@@ -226,7 +313,8 @@ async def list_knowledge_bases(
 @router.post("/knowledge-bases", response_model=KBResponse)
 async def create_knowledge_base(
     req: KBCreateRequest,
-    _admin=Depends(require_admin),
+    request: Request,
+    admin=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     existing = await db.execute(
@@ -254,6 +342,17 @@ async def create_knowledge_base(
     db.add(kb)
     await db.commit()
     await db.refresh(kb)
+
+    await log_operation(
+        operator=admin,
+        action="kb.create",
+        target_type="kb",
+        target_id=kb.id,
+        target_label=f"知识库 {kb.name}",
+        detail=f"slug={kb.slug}, es_index={kb.es_index}",
+        request=request,
+    )
+
     return KBResponse(
         id=kb.id, name=kb.name, description=kb.description,
         slug=kb.slug, es_index=kb.es_index,
@@ -266,7 +365,8 @@ async def create_knowledge_base(
 @router.delete("/knowledge-bases/{kb_id}")
 async def delete_knowledge_base(
     kb_id: uuid.UUID,
-    _admin=Depends(require_admin),
+    request: Request,
+    admin=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -278,16 +378,31 @@ async def delete_knowledge_base(
     if kb.slug == "zhong_guo_quan_ke":
         raise HTTPException(403, "默认知识库不可删除")
 
+    kb_name = kb.name
+    kb_slug = kb.slug
+
     # Unlink docs (set kb_id=NULL instead of cascade delete for safety)
     doc_result = await db.execute(
         select(DocumentTask).where(DocumentTask.kb_id == kb_id)
     )
+    unlinked = 0
     for doc in doc_result.scalars().all():
         doc.kb_id = None
+        unlinked += 1
     await db.commit()
 
     await db.delete(kb)
     await db.commit()
+
+    await log_operation(
+        operator=admin,
+        action="kb.delete",
+        target_type="kb",
+        target_id=kb_id,
+        target_label=f"知识库 {kb_name}",
+        detail=f"slug={kb_slug}, 解除关联文档 {unlinked} 篇",
+        request=request,
+    )
     return {"ok": True}
 
 
@@ -312,8 +427,9 @@ async def list_documents(
 @router.post("/knowledge-bases/{kb_id}/documents", response_model=DocumentResponse)
 async def upload_document(
     kb_id: uuid.UUID,
+    request: Request,
     file: UploadFile = File(...),
-    _admin=Depends(require_admin),
+    admin=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     kb_result = await db.execute(
@@ -340,6 +456,15 @@ async def upload_document(
         existing.kb_id = kb_id
         await db.commit()
         await broadcast_doc_update(existing)
+        await log_operation(
+            operator=admin,
+            action="doc.upload",
+            target_type="document",
+            target_id=existing.id,
+            target_label=f"文档 {existing.original_name}",
+            detail=f"MD5 重复，复用已有记录并归入知识库 {kb.name}",
+            request=request,
+        )
         return DocumentResponse.model_validate(existing)
 
     raw_path = upload_raw_pdf(file_md5, file.filename or "unknown", content)
@@ -375,13 +500,27 @@ async def upload_document(
         await db.refresh(task)
         await broadcast_doc_update(task)
 
+    await log_operation(
+        operator=admin,
+        action="doc.upload",
+        target_type="document",
+        target_id=task.id,
+        target_label=f"文档 {task.original_name}",
+        detail=(
+            f"知识库 {kb.name}, {len(content)} 字节, "
+            f"状态 {task.status}"
+        ),
+        request=request,
+    )
+
     return DocumentResponse.model_validate(task)
 
 
 @router.delete("/documents/{doc_id}")
 async def delete_document(
     doc_id: uuid.UUID,
-    _admin=Depends(require_admin),
+    request: Request,
+    admin=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(DocumentTask).where(DocumentTask.id == doc_id))
@@ -393,6 +532,7 @@ async def delete_document(
     steps = task.pipeline_steps
     kb_id = task.kb_id
     batch_id = task.batch_id  # 预置文献存 ES doc_id
+    doc_name = task.original_name
 
     await _cleanup_es_milvus(md5, steps, task_batch_id=batch_id)
     await db.delete(task)
@@ -403,13 +543,24 @@ async def delete_document(
             "type": "doc_deleted", "doc_id": str(doc_id),
         })
 
+    await log_operation(
+        operator=admin,
+        action="doc.delete",
+        target_type="document",
+        target_id=doc_id,
+        target_label=f"文档 {doc_name}",
+        detail=f"已清理 ES/Milvus 中该文档的 chunk（md5={md5[:8]}…）",
+        request=request,
+    )
+
     return {"ok": True}
 
 
 @router.post("/documents/{doc_id}/retry")
 async def retry_document(
     doc_id: uuid.UUID,
-    _admin=Depends(require_admin),
+    request: Request,
+    admin=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """从第一个失败的步骤重试"""
@@ -464,5 +615,15 @@ async def retry_document(
         task.error_msg = None
         await db.commit()
         await broadcast_doc_update(task)
+
+    await log_operation(
+        operator=admin,
+        action="doc.retry",
+        target_type="document",
+        target_id=task.id,
+        target_label=f"文档 {task.original_name}",
+        detail=f"从步骤「{retry_from}」开始重试",
+        request=request,
+    )
 
     return {"ok": True, "retry_from": retry_from}

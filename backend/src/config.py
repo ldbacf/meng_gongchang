@@ -1,4 +1,4 @@
-"""全局配置，从 .env 加载"""
+"""全局配置，从 .env 加载并提供默认值，缓存到AOP"""
 
 import os
 from pathlib import Path
@@ -87,7 +87,11 @@ DEEPSEEK_ANSWER_MODEL = os.getenv("DEEPSEEK_ANSWER_MODEL", "deepseek-v4-pro")
 USE_QUERY_EXPANSION = os.getenv("USE_QUERY_EXPANSION", "false").lower() == "true"
 
 # ── CORS ───────────────────────────────────────────────────
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
+# 5173 = 用户端，5174 = 管理端（两个独立前端）
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:5173,http://localhost:5174",
+)
 
 # ── Worker ─────────────────────────────────────────────────
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))

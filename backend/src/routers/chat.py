@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth import get_current_user
 from src.db import get_db
+from src.log_service import log_retrieval, touch_user_activity
 from src.models import Conversation, KnowledgeBase, Message, User
 from src.schemas import (
     ChatSendRequest,
@@ -438,6 +439,29 @@ async def chat_stream(
         )
         db.add(ai_msg)
         await db.commit()
+
+        # ── 埋点：检索记录 + 用户活跃时间（内部吞异常，不影响主流程）──
+        kb_uuid = None
+        if req.kb_id:
+            try:
+                kb_uuid = uuid.UUID(str(req.kb_id))
+            except (ValueError, AttributeError):
+                kb_uuid = None
+        await log_retrieval(
+            user_id=user.id,
+            kb_id=kb_uuid,
+            conversation_id=conv_id,
+            message_id=ai_msg.id,
+            query=req.message,
+            es_index=es_idx,
+            es_hits=es_count,
+            milvus_hits=milvus_count,
+            fused_count=len(hits),
+            cited_count=len(citations),
+            top_score=max((h.score_rerank for h in reranked), default=None),
+            latency_ms=round((t3_end - t2) * 1000),
+        )
+        await touch_user_activity(user.id)
 
         yield _sl({"t":"done", "conversation_id": str(conv_id), "message_id": message_id})
 
