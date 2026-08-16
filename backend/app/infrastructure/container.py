@@ -33,6 +33,12 @@ class AppContainer:
         self._event_bus = None
         self._ws = None
         self._key_manager = None
+        self._checkpointer = None
+        self._ingest_graph = None
+        self._index_subgraph = None
+        self._submission_service = None
+        self._delete_service = None
+        self._retry_service = None
         self._started = False
         self._closed = False
 
@@ -226,6 +232,73 @@ class AppContainer:
             self._ws = WSRegistry(self.get_event_bus())
         return self._ws
 
+    # ── 阶段 3：checkpoint 与入库图 ─────────────────────────
+
+    def get_checkpointer(self):
+        """AsyncPostgresSaver（start() 时创建；测试注入 fake/InMemorySaver 不经 start）。"""
+        f = self._fake("checkpointer")
+        if f is not None:
+            return f
+        if self._checkpointer is None:
+            raise RuntimeError("checkpointer 未创建：请先 await container.start()")
+        return self._checkpointer
+
+    def get_ingest_graph(self):
+        """批级入库图（compile 挂 checkpointer，C3）。"""
+        f = self._fake("ingest_graph")
+        if f is not None:
+            return f
+        if self._ingest_graph is None:
+            from app.application.graphs.ingest_graph import build_ingest_graph
+
+            self._ingest_graph = build_ingest_graph(self.get_checkpointer())
+        return self._ingest_graph
+
+    def get_index_subgraph(self):
+        """index_document 子图（per-doc，同 checkpointer）。"""
+        f = self._fake("index_subgraph")
+        if f is not None:
+            return f
+        if self._index_subgraph is None:
+            from app.application.graphs.subgraphs.index_document import (
+                build_index_document_graph,
+            )
+
+            self._index_subgraph = build_index_document_graph(self.get_checkpointer())
+        return self._index_subgraph
+
+    # ── 阶段 3：应用服务 ─────────────────────────────────────
+
+    def get_submission_service(self):
+        f = self._fake("submission_service")
+        if f is not None:
+            return f
+        if self._submission_service is None:
+            from app.application.services.document_submission import SubmissionService
+
+            self._submission_service = SubmissionService(self)
+        return self._submission_service
+
+    def get_delete_service(self):
+        f = self._fake("delete_service")
+        if f is not None:
+            return f
+        if self._delete_service is None:
+            from app.application.services.document_deletion import DeleteDocumentService
+
+            self._delete_service = DeleteDocumentService(self)
+        return self._delete_service
+
+    def get_retry_service(self):
+        f = self._fake("retry_service")
+        if f is not None:
+            return f
+        if self._retry_service is None:
+            from app.application.services.retry_service import RetryService
+
+            self._retry_service = RetryService(self)
+        return self._retry_service
+
     # ── 生命周期 ───────────────────────────────────────────
 
     async def start(self) -> None:
@@ -243,6 +316,20 @@ class AppContainer:
         # 预热 bge-m3（启动加载一次，后续常驻）
         self.get_embedder().get_hf_embeddings()
         print("[API] bge-m3 模型加载完成")
+
+        # 阶段 3：checkpoint saver（AsyncPostgresSaver，表已由 Alembic 0002 建好）
+        # 创建失败降级（如 Windows ProactorEventLoop 下 psycopg 不可用）——
+        # get_ingest_graph 使用时会抛明确错误；API 本体仍可启动。
+        if self._checkpointer is None and self._fake("checkpointer") is None:
+            try:
+                from app.infrastructure.checkpoint.pg_saver import create_pg_saver
+
+                self._checkpointer = await create_pg_saver(
+                    self.get_settings().resolved_database_url
+                )
+                print("[API] Postgres checkpointer 就绪")
+            except Exception as e:
+                print(f"[API] 警告: Postgres checkpointer 创建失败（图不可用）: {e}")
 
         self._started = True
 
@@ -283,6 +370,10 @@ class AppContainer:
         llm = self._llm or self._fake("llm")
         if llm is not None and hasattr(llm, "release"):
             llm.release()
+        if self._checkpointer is not None:
+            from app.infrastructure.checkpoint.pg_saver import close_pg_saver
+
+            await close_pg_saver(self._checkpointer)
 
         self._engine = None
         self._sessionmaker = None
@@ -299,5 +390,11 @@ class AppContainer:
         self._event_bus = None
         self._ws = None
         self._key_manager = None
+        self._checkpointer = None
+        self._ingest_graph = None
+        self._index_subgraph = None
+        self._submission_service = None
+        self._delete_service = None
+        self._retry_service = None
         self._started = False
         self._closed = True
