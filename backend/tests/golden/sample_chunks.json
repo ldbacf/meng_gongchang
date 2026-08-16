@@ -1,0 +1,108 @@
+{
+  "doc_id": "A-2024-001",
+  "md5": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "total_chunks": 5,
+  "chunks": [
+    {
+      "chunk_id": "A-2024-001__L0",
+      "doc_id": "A-2024-001",
+      "level": "L0",
+      "chunk_type": "paper",
+      "journal": "中国全科医学",
+      "source": "",
+      "doi": "10.12114/j.issn.1007-9572.2024.0001",
+      "section": "论著",
+      "article_type": "原创研究",
+      "title_cn": "社区高血压患者血压控制影响因素分析",
+      "title_en": "Analysis of factors affecting blood pressure control in community hypertensive patients",
+      "authors_cn": "张三; 李四",
+      "keywords_cn": [
+        "高血压",
+        "血压控制",
+        "依从性"
+      ],
+      "keywords_en": [
+        "Hypertension",
+        "Blood pressure control"
+      ],
+      "content": "【标题】社区高血压患者血压控制影响因素分析\n\n【摘要】目的：探讨社区高血压患者血压控制的影响因素。方法：回顾性分析 120 例患者资料，采用多因素 Logistic 回归。\n\n【关键词】高血压; 血压控制; 依从性",
+      "md5": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "chunk_id": "A-2024-001__L1__1",
+      "doc_id": "A-2024-001",
+      "level": "L1",
+      "chunk_type": "paragraph",
+      "doi": "10.12114/j.issn.1007-9572.2024.0001",
+      "metadata": {
+        "title_cn": "社区高血压患者血压控制影响因素分析",
+        "keywords_cn": "高血压; 血压控制; 依从性"
+      },
+      "heading_stack": [
+        "1 引言"
+      ],
+      "heading_depth": 1,
+      "refers_to_tables": [
+        1
+      ],
+      "content": "【章节】1 引言\n\n高血压是最常见的慢性病之一。患者依从性差是血压控制不佳的主要原因，见表1。"
+    },
+    {
+      "chunk_id": "A-2024-001__L1__2.1",
+      "doc_id": "A-2024-001",
+      "level": "L1",
+      "chunk_type": "paragraph",
+      "doi": "10.12114/j.issn.1007-9572.2024.0001",
+      "metadata": {
+        "title_cn": "社区高血压患者血压控制影响因素分析",
+        "keywords_cn": "高血压; 血压控制; 依从性"
+      },
+      "heading_stack": [
+        "1 引言",
+        "2.1 研究方法"
+      ],
+      "heading_depth": 2,
+      "refers_to_tables": [],
+      "content": "【章节】1 引言 → 2.1 研究方法\n\n本研究纳入 2023 年 1 月至 12 月就诊的高血压患者 120 例。"
+    },
+    {
+      "chunk_id": "A-2024-001__L1__4",
+      "doc_id": "A-2024-001",
+      "level": "L1",
+      "chunk_type": "paragraph",
+      "doi": "10.12114/j.issn.1007-9572.2024.0001",
+      "metadata": {
+        "title_cn": "社区高血压患者血压控制影响因素分析",
+        "keywords_cn": "高血压; 血压控制; 依从性"
+      },
+      "heading_stack": [
+        "4 讨论"
+      ],
+      "heading_depth": 1,
+      "refers_to_tables": [],
+      "content": "【章节】4 讨论\n\n本研究结果与既往文献一致。"
+    },
+    {
+      "chunk_id": "A-2024-001__L2__table_1",
+      "doc_id": "A-2024-001",
+      "level": "L2",
+      "chunk_type": "table",
+      "doi": "10.12114/j.issn.1007-9572.2024.0001",
+      "metadata": {
+        "title_cn": "社区高血压患者血压控制影响因素分析",
+        "keywords_cn": "高血压; 血压控制; 依从性"
+      },
+      "heading_stack": [
+        "1 引言"
+      ],
+      "heading_depth": 1,
+      "table_number": 1,
+      "table_caption": "表1 患者基线特征",
+      "table_caption_en": "",
+      "html_size": 127,
+      "refers_to_tables": [],
+      "content": "【章节】1 引言\n\n【作者结论】高血压是最常见的慢性病之一。患者依从性差是血压控制不佳的主要原因，见表1。\n\n【表1 患者基线特征】\n\n【表注】注：数据以均数±标准差表示。",
+      "html_body": "<table>\n<tr><th>指标</th><th>数值</th></tr>\n<tr><td>年龄</td><td>65.2±8.3</td></tr>\n<tr><td>收缩压</td><td>152.6±18.4</td></tr>\n</table>"
+    }
+  ]
+}

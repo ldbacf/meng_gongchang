@@ -63,25 +63,18 @@ def process_document(
     es_index: str,
     milvus_collection: str,
     on_step=None,
+    meta: dict | None = None,
 ) -> int:
     """
-    完整索引管线: markdown → chunk → embed → ES + Milvus.
+    完整索引管线: markdown → chunk_document(统一入口) → embed → ES + Milvus.
 
     on_step(step_name: str, status: str, **kwargs) — 每步回调，用于更新 DB
+    meta: doc-meta JSON（通用 KB 通常为空 → generic L0；doc_id 契约口径 md5[:8]）
     返回写入的 chunk 数。
     """
-    from src.chunker import (
-        FullMdParser, HeadingStack,
-        _assemble_l0_chunk_generic,
-        _assemble_l1_chunks,
-        _assemble_l2_table_chunks,
-        build_table_dict, scan_paragraphs,
-    )
+    from app.domain.chunking.chunk_document import chunk_document
 
     markdown = read_parsed_markdown(md5)
-    parser = FullMdParser(markdown)
-    elements = parser.parse()
-
     title = Path(filename).stem
 
     def _step(step: str, status: str, **kwargs):
@@ -90,18 +83,8 @@ def process_document(
 
     _step("chunking", "running")
 
-    # L0
-    l0 = _assemble_l0_chunk_generic(md5, title, elements)
-    # L1
-    l1s = _assemble_l1_chunks(md5, "", elements, HeadingStack())
-    # L2
-    tables = build_table_dict(elements)
-    scan_paragraphs(elements, HeadingStack(), tables)
-    l2s = _assemble_l2_table_chunks(
-        doc_id=md5, doi="", md5=md5, title_cn=title, tables=tables,
-    )
-
-    all_chunks = [l0] + l1s + l2s
+    result = chunk_document(md5, markdown, None, meta, title=title)
+    all_chunks = result["chunks"]
     _step("chunking", "done", chunk_count=len(all_chunks))
 
     # Embed

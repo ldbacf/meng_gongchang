@@ -1,0 +1,15 @@
+[
+  [
+    {
+      "type": "table",
+      "content": {
+        "table_caption": [
+          {"content": "表1 患者基线特征"}
+        ],
+        "table_footnote": [
+          {"content": "注：数据以均数±标准差表示。"}
+        ]
+      }
+    }
+  ]
+]
