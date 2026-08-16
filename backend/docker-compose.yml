@@ -140,3 +140,24 @@ services:
       - MILVUS_URL=milvus:19530
     depends_on:
       - milvus
+
+  # 阶段 3：入库 worker（独立进程驱动 IngestionGraph；O-3.2）。
+  # 默认不启动（`docker compose --profile worker up`）；backend 镜像（Dockerfile）与
+  # 健康检查/scale 在阶段 5 完善。本地开发用 `uv run pipeline-worker` 独立终端运行。
+  worker:
+    profiles: ["worker"]
+    build:
+      context: .
+    command: ["uv", "run", "pipeline-worker"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy

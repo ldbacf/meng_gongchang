@@ -89,21 +89,11 @@ async def lifespan(app: FastAPI):
     print("[API] KeyManager 启动:")
     print(await get_key_manager().usage_report())
 
-    # 启动后台 Worker（MinerU 轮询 + 索引管线）
-    import asyncio
-    from src.worker import run_worker_background
-    _worker_stop = asyncio.Event()
-    _worker_task = asyncio.create_task(run_worker_background(_worker_stop))
-
+    # 阶段 3：worker 已剥离为独立进程（app.application.worker / pipeline-worker），
+    # API 进程不再内嵌消费队列——入库管线由独立 worker 驱动 IngestionGraph。
     yield
 
-    _worker_stop.set()
-    _worker_task.cancel()
-    try:
-        await _worker_task
-    except asyncio.CancelledError:
-        pass
-    await container.close()  # 统一 dispose（engine/redis/milvus/bge-m3）
+    await container.close()  # 统一 dispose（engine/redis/milvus/bge-m3/checkpointer）
 
 
 app = FastAPI(
@@ -140,82 +130,22 @@ async def _submit_batches(
     session,
 ):
     """
-    核心: 按 KeyManager 分配 token，每 10 个一批提交 MinerU（三阶段额度）。
+    提交批次到 MinerU — 统一经 SubmissionService（O-3.5，收敛双入口）。
 
     to_submit: [{"name": "...", "data": b"...", "md5": "..."}]
     """
-    key_mgr = get_key_manager()
-    vault = get_container().get_token_vault()
-    # {token_id: [{"name": ..., "data": ..., "md5": ..., "pages": N, "res": Reservation}, ...]}
-    groups: dict[str, list[dict]] = defaultdict(list)
-    sorted_files = []
+    from app.interface.deps import get_container
 
-    # 读页数 + 分配 key
+    svc = get_container().get_submission_service()
     for fi in to_submit:
-        pages = _pdf_pages(fi["data"])
-        fi["pages"] = pages
-        sorted_files.append(fi)
-
-    # 大文件优先处理 (减少碎片)
-    sorted_files.sort(key=lambda x: x["pages"], reverse=True)
-
-    # 先按 pages 排序，再逐个 reserve 占额（跨进程一致，Redis 记账）
-    for fi in sorted_files:
-        pages = fi["pages"]
-        try:
-            res = await key_mgr.acquire(pages)
-            fi["res"] = res
-            groups[res.token_id].append(fi)
-        except TokenExhausted as e:
-            print(f"[API] {e}")
-            # 把未分配的标为失败
-            for failed_md5 in [fi["md5"]]:
-                stmt = select(DocumentTask).where(DocumentTask.md5 == failed_md5)
-                r = await session.execute(stmt)
-                t = r.scalar_one_or_none()
-                if t:
-                    t.set_status(TaskStatus.FAILED)
-                    t.error_msg = f"所有 Key 额度用完: {e}"
-            await session.commit()
-            continue
-
-    # 每个 key 的文件分成 10 个一批提交
-    for token_id, files in groups.items():
-        token = vault.resolve(token_id)
-        for i in range(0, len(files), MINERU_BATCH_SIZE):
-            chunk = files[i:i + MINERU_BATCH_SIZE]
-            chunk_pages = sum(f["pages"] for f in chunk)
-            print(f"[API] 提交 {len(chunk)} 个文件 "
-                  f"(token={token_id}, 共{chunk_pages}页)")
-
-            try:
-                batch_id, md5_list = await submit_batch(
-                    [{k: f[k] for k in ("name", "data", "md5")} for f in chunk],
-                    token=token,
-                )
-                for fi in chunk:
-                    stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
-                    r = await session.execute(stmt)
-                    t = r.scalar_one_or_none()
-                    if t:
-                        t.batch_id = batch_id
-                        t.set_status(TaskStatus.PROCESSING)
-                await session.commit()
-                await key_mgr.commit([f["res"] for f in chunk])  # 提交成功 → commit
-                await enqueue_batch(batch_id, md5_list, token_id=token_id)
-                print(f"  [API] 完成 -> batch_id={batch_id}")
-            except Exception as e:
-                traceback.print_exc()
-                print(f"[API] 批次提交失败: {e}")
-                await key_mgr.refund([f["res"] for f in chunk])  # 失败退回
-                for fi in chunk:
-                    stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
-                    r = await session.execute(stmt)
-                    t = r.scalar_one_or_none()
-                    if t:
-                        t.set_status(TaskStatus.FAILED)
-                        t.error_msg = str(e)
-                await session.commit()
+        if "pages" not in fi:
+            fi["pages"] = _pdf_pages(fi["data"])
+    results = await svc.submit(to_submit)
+    for r in results:
+        if r["ok"]:
+            print(f"  [API] {r['md5'][:8]}: 已提交 batch={r['batch_id']}")
+        else:
+            print(f"  [API] {r['md5'][:8]}: 提交失败: {r['error']}")
 
 
 # ── 查重逻辑 ──────────────────────────────────────────────────
@@ -235,8 +165,11 @@ async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateRespons
     existing = result.scalar_one_or_none()
 
     if existing:
-        if kb_id:
-            existing.kb_id = kb_id
+        # O-3.7：禁止 reassign kb_id（归属漂移）——跨 KB 重传复制新 task（保留 parsed 引用）
+        if kb_id and existing.kb_id != kb_id:
+            return await _copy_across_kb(
+                existing, file_md5, filename, content, kb_id, session
+            )
         if existing.status == TaskStatus.PARSED and check_parsed_exists(file_md5):
             await session.commit()
             return TaskCreateResponse(
@@ -257,6 +190,59 @@ async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateRespons
             raw_minio_path=existing.raw_minio_path,
             message="重试: 重新提交解析",
         ), {"name": filename, "data": content, "md5": file_md5}
+
+
+async def _copy_across_kb(
+    existing, file_md5: str, filename: str, content: bytes, kb_id, session,
+) -> tuple[TaskCreateResponse, dict | None]:
+    """跨 KB 重传（O-3.7）：复制新 task 到目标 KB，保留 parsed 引用，不 reassign 原 task。
+
+    - 已解析（parsed_minio_path 存在）：新 task 置 PARSED + 发 resume 队列消息
+      （batch_id=新 task.id，worker 从 checkpoint 续跑直接重索引到新 KB）。
+    - 未解析：新 task 置 PENDING，返回 fi 由调用方重新提交解析。
+    """
+    from datetime import datetime as _dt, timezone as _tz
+
+    from src.models import default_pipeline_steps
+
+    steps = default_pipeline_steps()
+    now = _dt.now(_tz.utc).timestamp()
+    steps["upload"] = {"status": "done", "ts": now}
+    parsed = bool(existing.parsed_minio_path)
+    if parsed:
+        steps["mineru"] = {"status": "done", "ts": now}
+
+    task = DocumentTask(
+        kb_id=kb_id,
+        md5=file_md5,
+        original_name=existing.original_name,
+        raw_minio_path=existing.raw_minio_path,
+        parsed_minio_path=existing.parsed_minio_path,
+        status=TaskStatus.PARSED if parsed else TaskStatus.PENDING,
+        pipeline_steps=steps,
+    )
+    session.add(task)
+    await session.commit()
+    await session.refresh(task)
+
+    if parsed:
+        # 复用解析产物：resume 消息触发 worker 重索引（不经 MinerU）
+        from app.interface.deps import get_container
+
+        await get_container().get_queue().enqueue(
+            str(task.id), [file_md5], token_id="", mode="resume"
+        )
+        return TaskCreateResponse(
+            id=task.id, md5=task.md5, original_name=task.original_name,
+            status=task.status, raw_minio_path=task.raw_minio_path,
+            message="跨知识库复制: 复用解析产物，待索引",
+        ), None
+
+    return TaskCreateResponse(
+        id=task.id, md5=task.md5, original_name=task.original_name,
+        status=task.status, raw_minio_path=task.raw_minio_path,
+        message="跨知识库复制: 待提交解析",
+    ), {"name": filename, "data": content, "md5": file_md5}
 
     # 新文件
     from datetime import datetime as _dt, timezone as _tz

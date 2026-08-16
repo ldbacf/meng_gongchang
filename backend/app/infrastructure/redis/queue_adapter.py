@@ -30,6 +30,7 @@ class BatchMessage:
     token_id: str
     submit_ts: float = 0.0
     attempts: int = 0
+    mode: str = "submit"  # "submit" 新批 | "resume" checkpoint 续跑（retry 用）
 
     def to_json(self) -> str:
         return json.dumps(
@@ -39,6 +40,7 @@ class BatchMessage:
                 "token_id": self.token_id,
                 "submit_ts": self.submit_ts,
                 "attempts": self.attempts,
+                "mode": self.mode,
             },
             ensure_ascii=False,
         )
@@ -52,6 +54,7 @@ class BatchMessage:
             token_id=data.get("token_id", ""),
             submit_ts=data.get("submit_ts", 0.0),
             attempts=data.get("attempts", 0),
+            mode=data.get("mode", "submit"),
         )
 
 
@@ -93,8 +96,13 @@ class QueueAdapter:
 
     # ── 写 ────────────────────────────────────────────────────
 
-    async def enqueue(self, batch_id: str, md5_list: list[str], token_id: str) -> str:
-        """XADD 一条批消息（自动建 group）。返回 entry id。"""
+    async def enqueue(
+        self, batch_id: str, md5_list: list[str], token_id: str, mode: str = "submit"
+    ) -> str:
+        """XADD 一条批消息（自动建 group）。返回 entry id。
+
+        mode: "submit" 新批 / "resume" checkpoint 续跑（retry 用，batch_id 是原批=thread 键）。
+        """
         await self._ensure_group()
         msg = BatchMessage(
             batch_id=batch_id,
@@ -102,6 +110,7 @@ class QueueAdapter:
             token_id=token_id,
             submit_ts=time.time(),
             attempts=0,
+            mode=mode,
         )
         return await self._redis.xadd(self._stream, {"payload": msg.to_json()})
 
@@ -136,6 +145,11 @@ class QueueAdapter:
             except (KeyError, json.JSONDecodeError):
                 await self._redis.xack(self._stream, self._group, entry_id)
                 continue
+            # 前置检查：batch 锁未释放（有 worker 在途）或已 superseded（MinerU 重提交）
+            # → 不回收，留 pending（锁持有者释放后 / 下次 claim 再试），防同批双跑
+            if await self._redis.exists(f"batch:{msg.batch_id}:lock") or \
+                    await self._redis.exists(f"batch:{msg.batch_id}:superseded"):
+                break
             # attempts+1，超限进 DLQ，否则重投（新 entry 经 '>' 重新读取）
             msg.attempts += 1
             await self._redis.xack(self._stream, self._group, entry_id)
@@ -190,6 +204,31 @@ class QueueAdapter:
                 await self._xadd_dlq(msg)
             else:
                 await self._redis.xadd(self._stream, {"payload": msg.to_json()})
+
+    # ── batch 级并发控制（阶段 3）────────────────────────────
+
+    async def acquire_lock(self, batch_id: str, ttl: int = 300) -> bool:
+        """认领批锁（SET NX）——防双 worker / retry 与存活 worker 同批双跑。"""
+        return bool(
+            await self._redis.set(f"batch:{batch_id}:lock", "1", nx=True, ex=ttl)
+        )
+
+    async def release_lock(self, batch_id: str) -> None:
+        await self._redis.delete(f"batch:{batch_id}:lock")
+
+    async def renew_lock(self, batch_id: str, ttl: int = 300) -> None:
+        """处理期间周期续租（防长批被可见性超时回收）。"""
+        await self._redis.expire(f"batch:{batch_id}:lock", ttl)
+
+    async def is_locked(self, batch_id: str) -> bool:
+        return bool(await self._redis.exists(f"batch:{batch_id}:lock"))
+
+    async def mark_superseded(self, batch_id: str, ttl: int = 7 * 24 * 3600) -> None:
+        """标记批已被新提交取代（MinerU 重提交）——旧批消息回收后短路，不踩新状态。"""
+        await self._redis.set(f"batch:{batch_id}:superseded", "1", ex=ttl)
+
+    async def is_superseded(self, batch_id: str) -> bool:
+        return bool(await self._redis.exists(f"batch:{batch_id}:superseded"))
 
     async def dead_letter(self, entry_id: str) -> None:
         """直接进 DLQ 并 ack 原消息。"""

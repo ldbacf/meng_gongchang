@@ -60,7 +60,8 @@ packages = ["src", "app"]
 
 [project.scripts]
 pipeline-api = "src.main:app"
-pipeline-worker = "src.worker:run_worker"
+# 阶段 3：独立 worker 进程（驱动 IngestionGraph）
+pipeline-worker = "app.application.worker:main"
 
 [[tool.uv.index]]
 name = "pytorch-cu124"
