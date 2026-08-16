@@ -134,7 +134,9 @@ class DocumentTask(Base):
         UUID(as_uuid=True), ForeignKey("knowledge_bases.id", ondelete="SET NULL"), nullable=True, index=True
     )
     knowledge_base: Mapped[KnowledgeBase | None] = relationship(back_populates="documents")
-    md5: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
+    # 阶段 3：md5 全局唯一 → (md5, kb_id) 复合唯一（KB 内查重；跨 KB 复制新 task）。
+    # unique index 由 Alembic 0004 管理（uq_document_tasks_md5_kb_id）。
+    md5: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     original_name: Mapped[str] = mapped_column(String(512), nullable=False)
     raw_minio_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     meta_minio_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)

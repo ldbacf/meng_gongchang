@@ -40,50 +40,14 @@ def _pdf_pages(data: bytes) -> int:
 
 
 async def _submit_one_file(fi: dict, db: AsyncSession):
-    """轻量单文件提交 — 三阶段额度（reserve → submit → commit/refund）"""
+    """轻量单文件提交 — 统一经 SubmissionService（O-3.5，三阶段额度）。"""
     from app.interface.deps import get_container
-    from src.key_manager import TokenExhausted, get_key_manager
 
-    key_mgr = get_key_manager()
-    vault = get_container().get_token_vault()
-    try:
-        res = await key_mgr.acquire(fi["pages"])
-    except TokenExhausted as e:
-        stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
-        r = await db.execute(stmt)
-        t = r.scalar_one_or_none()
-        if t:
-            t.set_status(TaskStatus.FAILED)
-            t.error_msg = f"额度用完: {e}"
-        await db.commit()
-        return
-
-    from src import mineru_client
-
-    token = vault.resolve(res.token_id)
-    try:
-        batch_id, md5_list = await mineru_client.submit_batch([fi], token=token)
-        stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
-        r = await db.execute(stmt)
-        t = r.scalar_one_or_none()
-        if t:
-            t.batch_id = batch_id
-            t.set_status(TaskStatus.PROCESSING)
-        await db.commit()
-        await key_mgr.commit([res])
-    except Exception as e:
-        await key_mgr.refund([res])
-        stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
-        r = await db.execute(stmt)
-        t = r.scalar_one_or_none()
-        if t:
-            t.set_status(TaskStatus.FAILED)
-            t.error_msg = str(e)
-        await db.commit()
-        raise
-
-    from src.redis_client import enqueue_batch
-    await enqueue_batch(batch_id, md5_list, token_id=res.token_id)
+    svc = get_container().get_submission_service()
+    results = await svc.submit([fi])
+    if results and not results[0]["ok"]:
+        # 保持原行为：失败向上抛（调用方 except 处理 + 响应置 FAILED）
+        raise Exception(results[0]["error"])
 
 
 async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None, task_batch_id: str | None = None) -> None:
@@ -354,15 +318,27 @@ async def upload_document(
 
     file_md5 = hashlib.md5(content).hexdigest()
 
-    # Check for existing document
+    # Check for existing document（O-3.7：KB 内查重；跨 KB 复制；禁止 reassign kb_id）
     existing_result = await db.execute(
         select(DocumentTask).where(DocumentTask.md5 == file_md5)
     )
     existing = existing_result.scalar_one_or_none()
     if existing:
-        existing.kb_id = kb_id
-        await db.commit()
-        await broadcast_doc_update(existing)
+        if existing.kb_id != kb_id:
+            from src.main import _copy_across_kb
+
+            resp, _fi = await _copy_across_kb(
+                existing, file_md5, file.filename or "unknown", content, kb_id, db,
+            )
+            return DocumentResponse(
+                id=resp.id, original_name=resp.original_name, md5=resp.md5,
+                status=resp.status, kb_id=kb_id,
+            )
+        if existing.status == TaskStatus.PARSED and check_parsed_exists(file_md5):
+            await db.commit()
+            await broadcast_doc_update(existing)
+            return DocumentResponse.model_validate(existing)
+        # 同 KB 已存在：提示已存在（不 reassign、不自动重提交）
         return DocumentResponse.model_validate(existing)
 
     raw_path = upload_raw_pdf(file_md5, file.filename or "unknown", content)
@@ -412,12 +388,17 @@ async def delete_document(
     if not task:
         raise HTTPException(404, "文档不存在")
 
-    md5 = task.md5
-    steps = task.pipeline_steps
     kb_id = task.kb_id
-    batch_id = task.batch_id  # 预置文献存 ES doc_id
 
-    await _cleanup_es_milvus(md5, steps, task_batch_id=batch_id)
+    # 阶段 3：DeleteDocumentService 按统一 doc_id 清理 ES/Milvus + 残留对账（O-3.6）
+    from app.application.services.document_deletion import DocumentBusyError
+    from app.interface.deps import get_container
+
+    try:
+        await get_container().get_delete_service().delete(task)
+    except DocumentBusyError as e:
+        raise HTTPException(409, str(e))
+
     await db.delete(task)
     await db.commit()
 
@@ -459,43 +440,20 @@ async def retry_document(
     if retry_from is None:
         raise HTTPException(400, "所有步骤已完成，无需重试")
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc).timestamp()  # ts 统一 float
 
     # 重置当前及后续步骤，dict() 强制新对象触发 SQLAlchemy JSONB 脏跟踪
     for step in PIPELINE_STEPS_ORDER[PIPELINE_STEPS_ORDER.index(retry_from):]:
         steps[step] = {"status": "pending", "ts": now}
     task.pipeline_steps = dict(steps)
+    await db.commit()
 
-    if retry_from == "mineru":
-        # 人为重开（重跑 MinerU 轮询），非状态机迁移
-        task.reset(reason="retry_mineru")
-        task.error_msg = None
-        await db.commit()
-        await broadcast_doc_update(task)
+    # 阶段 3：RetryService 从 checkpoint 恢复（O-3.4）——
+    # 索引失败 → reset + resume 队列消息（worker 续跑，禁重放已消费 batch）；
+    # MinerU 失败 → 重新提交（新 batch_id）+ 旧批 superseded。
+    from app.interface.deps import get_container
 
-        if task.batch_id:
-            from app.interface.deps import get_container
-            from src.redis_client import enqueue_batch, get_redis
+    result = await get_container().get_retry_service().retry(task)
+    await broadcast_doc_update(task)
 
-            # 优先用原 batch 的 token_id（worker 处理时写入 Redis），否则回退第一个可用 key
-            token_id = await get_redis().get(f"batch:{task.batch_id}")
-            if not token_id:
-                token_id = get_container().get_token_vault().first_id()
-            await enqueue_batch(task.batch_id, [task.md5], token_id=token_id)
-    else:
-        # chunking/embedding/es_write/milvus → 人为重开到 PENDING 并重新入队，Worker 重跑
-        # （MinerU 已完成，重新下载产物 + 重索引，幂等；修复原"只改状态不入队"的静默 no-op）
-        task.reset(reason="retry_index")
-        task.error_msg = None
-        await db.commit()
-        await broadcast_doc_update(task)
-        if task.batch_id:
-            from app.interface.deps import get_container
-            from src.redis_client import enqueue_batch, get_redis
-
-            token_id = await get_redis().get(f"batch:{task.batch_id}")
-            if not token_id:
-                token_id = get_container().get_token_vault().first_id()
-            await enqueue_batch(task.batch_id, [task.md5], token_id=token_id)
-
-    return {"ok": True, "retry_from": retry_from}
+    return {"ok": True, "retry_from": retry_from, "kind": result["kind"]}

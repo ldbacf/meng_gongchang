@@ -163,6 +163,25 @@ class MilvusAdapter:
             })
         return hits
 
+    def delete_by_doc_ids(self, collection_name: str, doc_ids: list[str]) -> None:
+        """按 doc_id 批量删除（阶段 3：删除 key 统一 doc_id）。"""
+        if not doc_ids:
+            return
+        self.connect()
+        col = Collection(collection_name)
+        quoted = ", ".join(f'"{d}"' for d in doc_ids)
+        col.delete(f"doc_id in [{quoted}]")
+
+    def count_by_doc_id(self, collection_name: str, doc_id: str) -> int:
+        """per-doc 残留计数（对账用；**不能用 num_entities**——集合级总数）。"""
+        self.connect()
+        col = Collection(collection_name)
+        try:
+            rows = col.query(expr=f'doc_id == "{doc_id}"', output_fields=["count(*)"])
+            return int(rows[0]["count(*)"]) if rows else 0
+        except Exception:
+            return -1  # 查询失败（如集合不存在）——对账时视为不可确认
+
     def close(self) -> None:
         try:
             connections.disconnect("default")
