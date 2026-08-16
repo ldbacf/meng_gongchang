@@ -57,23 +57,10 @@ from pymilvus import Collection, connections
 
 from src.config import MILVUS_HOST, MILVUS_PORT, MILVUS_COLLECTION
 
-# ── embedding 模型（模块级单例） ──
-_MODEL = None
-_MODEL_DEVICE = ""
-
-
+# ── embedding 模型（阶段 1：唯一工厂，经 AppContainer） ──
 def _get_model(device: str = ""):
-    global _MODEL, _MODEL_DEVICE
-    if _MODEL is None or _MODEL_DEVICE != device:
-        from sentence_transformers import SentenceTransformer
-        # 优先使用本地模型
-        local_path = os.path.join(os.path.dirname(__file__), "..", "models", "bge-m3")
-        local_path = os.path.abspath(local_path)
-        model_id = local_path if os.path.isdir(local_path) else "BAAI/bge-m3"
-        kw = {"device": device} if device else {}
-        _MODEL = SentenceTransformer(model_id, **kw)
-        _MODEL_DEVICE = device
-    return _MODEL
+    from app.interface.deps import get_container
+    return get_container().get_embedder().get_sentence_transformer(device)
 
 
 def _scan_json_files(data_dir: Path, limit: int | None = None) -> list[Path]:

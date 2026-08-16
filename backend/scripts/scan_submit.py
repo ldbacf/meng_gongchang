@@ -117,15 +117,18 @@ async def dedup_filter(pairs: list[dict]) -> list[dict]:
 
 
 async def submit_all(files: list[dict]):
+    from app.interface.deps import get_container
+
     km = get_key_manager()
+    vault = get_container().get_token_vault()
     files.sort(key=lambda x: x["pages"], reverse=True)
 
     groups = defaultdict(list)
     for fi in files:
         try:
-            t = km.acquire(fi["pages"])
-            km.release(t, fi["pages"])
-            groups[t].append(fi)
+            res = await km.acquire(fi["pages"])
+            fi["res"] = res
+            groups[res.token_id].append(fi)
         except TokenExhausted as e:
             log.warning("%s: 额度不足 -> %s", fi["stem"], e)
             async with async_session() as s:
@@ -140,7 +143,8 @@ async def submit_all(files: list[dict]):
     submitted = 0
     failed = 0
 
-    for token, flist in groups.items():
+    for token_id, flist in groups.items():
+        token = vault.resolve(token_id)
         for i in range(0, len(flist), MINERU_BATCH_SIZE):
             chunk = flist[i:i + MINERU_BATCH_SIZE]
             mbatch = []
@@ -172,13 +176,15 @@ async def submit_all(files: list[dict]):
                             row.batch_id = bid
                             row.status = TaskStatus.PROCESSING
                     await s.commit()
-                await enqueue_batch(bid, md5s, token=token)
+                await km.commit([f["res"] for f in chunk])
+                await enqueue_batch(bid, md5s, token_id=token_id)
                 submitted += len(chunk)
                 pbar.update(len(chunk))
                 pbar.set_postfix_str(f"成功{submitted} 失败{failed}")
             except Exception as e:
                 log.error("一批 %d 个提交失败: %s", len(chunk), e)
                 failed += len(chunk)
+                await km.refund([f["res"] for f in chunk])
                 async with async_session() as s:
                     for fi in chunk:
                         row = (await s.execute(select(DocumentTask).where(DocumentTask.md5 == fi["md5"]))).scalar_one_or_none()
@@ -199,7 +205,7 @@ async def submit_all(files: list[dict]):
     used_all = sum(1 for f in files if f["pages"] < 1)
     total_failed = failed + (total - submitted - failed)
     log.info("提交完成: %d 成功, %d 失败 (共 %d)", submitted, total - submitted, total)
-    log.info("额度报告:\n%s", km.usage_report())
+    log.info("额度报告:\n%s", await km.usage_report())
 
 
 async def main():
