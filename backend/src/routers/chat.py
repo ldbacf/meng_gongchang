@@ -454,14 +454,14 @@ async def chat_stream(
 
 def _fetch_l0_meta(hits: list) -> dict[str, dict]:
     """批量查询 ES L0 chunk 回填 title_cn / journal / md5"""
-    from src.search import _get_es
+    from src.search import get_es_client
 
     doc_ids = sorted({h.doc_id for h in hits if h.doc_id and not h.title_cn})
     if not doc_ids:
         return {}
 
     try:
-        es = _get_es()
+        es = get_es_client()
         resp = es.search(
             index="chunks",
             body={

@@ -1,4 +1,10 @@
-"""后台 Worker — 多 Token 支持"""
+"""后台 Worker — 多 Token 支持（阶段 1：Redis Streams at-least-once）。
+
+- 经 `container.get_queue().claim()` 取批（XREADGROUP + XAUTOCLAIM 回收崩溃 pending），
+  处理完成 `ack`；进程被杀 → 不 ack → 可见性超时后另一 worker 恢复（A-1.3）。
+- 队列 payload 只含 token_id；明文 token 经 TokenVault 解析。
+- MinerU 错误用结构化异常（MineruFatalError/MineruTransientError），字符串匹配兜底。
+"""
 
 import asyncio
 import signal
@@ -6,12 +12,17 @@ import time
 
 from sqlalchemy import select
 
+from app.interface.deps import get_container
 from src.config import MAX_POLL_TIME, POLL_INTERVAL
 from src.db import async_session
-from src.mineru_client import download_result, poll_batch
+from src.mineru_client import (
+    MineruFatalError,
+    MineruTransientError,
+    download_result,
+    poll_batch,
+)
 from src.minio_client import upload_parsed_assets
 from src.models import DocumentTask, TaskStatus
-from src.redis_client import dequeue_batch
 from src.ws_manager import broadcast_doc_update
 
 STATE_LABELS = {
@@ -33,9 +44,10 @@ def _step_update(task, step: str, status: str, **kwargs):
     task.pipeline_steps[step] = {"status": status, "ts": now, **kwargs}
 
 
-async def _process_one_batch(batch_id: str, md5_list: list[str], token: str):
-    """使用指定 token 轮询"""
-    print(f"[Worker] 轮询 batch_id={batch_id} token={token[:8]}...")
+async def _process_one_batch(batch_id: str, md5_list: list[str], token_id: str):
+    """使用指定 token_id 轮询（明文 token 经 vault 解析）。"""
+    token = get_container().get_token_vault().resolve(token_id) or ""
+    print(f"[Worker] 轮询 batch_id={batch_id} token_id={token_id}")
     start = time.time()
     pending = set(md5_list)
 
@@ -45,11 +57,28 @@ async def _process_one_batch(batch_id: str, md5_list: list[str], token: str):
 
         try:
             items = await poll_batch(batch_id, token=token)
+        except MineruFatalError as e:
+            print(f"[Worker] batch 不可恢复, 直接标记失败: {e}")
+            for md5 in pending:
+                async with async_session() as session:
+                    stmt = select(DocumentTask).where(DocumentTask.md5 == md5)
+                    r = await session.execute(stmt)
+                    t = r.scalar_one_or_none()
+                    if t:
+                        t.status = TaskStatus.FAILED
+                        t.error_msg = str(e)
+                        _step_update(t, "mineru", "failed", error=str(e))
+                        await session.commit()
+                        await broadcast_doc_update(t)
+            return
+        except MineruTransientError as e:
+            print(f"[Worker] 查询失败 ({elapsed:.0f}s): {e}，稍后重试")
+            continue
         except Exception as e:
             err_msg = str(e)
             print(f"[Worker] 查询失败 ({elapsed:.0f}s): {err_msg}")
 
-            # 致命错误: batch 不存在 / token 失效 → 直接标记失败
+            # 兜底字符串匹配（结构化分类迁移在阶段 3 正式落地）
             if any(kw in err_msg for kw in ("找不到任务", "没有权限", "Token 错误", "Token 过期")):
                 print(f"[Worker] batch 不可恢复, 直接标记失败")
                 for md5 in pending:
@@ -177,8 +206,33 @@ async def _process_one_batch(batch_id: str, md5_list: list[str], token: str):
                 await broadcast_doc_update(task)
 
 
-async def run_worker():
+async def _run_loop(stop_event: asyncio.Event | None):
+    """消费循环：claim → 处理 → ack。进程崩溃则消息不 ack，可见性超时后恢复。"""
+    container = get_container()
+    queue = container.get_queue()
+    redis = container.get_redis()
     print("[Worker] 启动，等待任务...")
+
+    while stop_event is None or not stop_event.is_set():
+        try:
+            job = await queue.claim(timeout=5)
+            if job is None:
+                continue
+            m = job.message
+            # batch_id → token_id 映射（重试用；worker 崩溃后 Streams pending 无 token 上下文）
+            await redis.set(f"batch:{m.batch_id}", m.token_id, ex=7 * 24 * 3600)
+            await _process_one_batch(m.batch_id, m.md5_list, m.token_id)
+            await queue.ack(job.entry_id)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[Worker] 异常: {e}")
+            await asyncio.sleep(5)
+    print("[Worker] 已停止")
+
+
+async def run_worker():
+    """独立 worker 进程入口（pyproject `pipeline-worker`）。"""
     stop = False
 
     def _shutdown(signum, frame):
@@ -191,40 +245,25 @@ async def run_worker():
 
     while not stop:
         try:
-            job = await dequeue_batch(timeout=5)
+            job = await get_container().get_queue().claim(timeout=5)
             if job is None:
                 continue
-            await _process_one_batch(
-                job["batch_id"],
-                job["md5_list"],
-                job.get("token", ""),
+            m = job.message
+            await get_container().get_redis().set(
+                f"batch:{m.batch_id}", m.token_id, ex=7 * 24 * 3600
             )
+            await _process_one_batch(m.batch_id, m.md5_list, m.token_id)
+            await get_container().get_queue().ack(job.entry_id)
+        except asyncio.CancelledError:
+            break
         except Exception as e:
             print(f"[Worker] 异常: {e}")
             await asyncio.sleep(5)
 
 
 async def run_worker_background(stop_event: asyncio.Event):
-    """后台 Worker — 由 FastAPI lifespan 管理，不需要 signal"""
-    print("[Worker] 后台启动，等待任务...")
-    while not stop_event.is_set():
-        try:
-            job = await asyncio.wait_for(dequeue_batch(timeout=5), timeout=10)
-            if job is None:
-                continue
-            await _process_one_batch(
-                job["batch_id"],
-                job["md5_list"],
-                job.get("token", ""),
-            )
-        except asyncio.TimeoutError:
-            continue
-        except Exception as e:
-            print(f"[Worker] 异常: {e}")
-            await asyncio.sleep(5)
-    print("[Worker] 已停止")
-
-    print("[Worker] 已退出")
+    """后台 Worker — 由 FastAPI lifespan 管理，不需要 signal。"""
+    await _run_loop(stop_event)
 
 
 if __name__ == "__main__":

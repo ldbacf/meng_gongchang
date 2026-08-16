@@ -1,41 +1,34 @@
-"""Redis 队列 — 用于存放待轮询的 batch_id"""
+"""Redis 队列 — 转发到 AppContainer（阶段 1：Redis Streams at-least-once）。
 
-import json
-
-import redis.asyncio as aioredis
-
-from src.config import REDIS_URL, REDIS_QUEUE
-
-_pool: aioredis.ConnectionPool | None = None
+- `enqueue_batch` 签名改为 `token_id`（contract 4.2.1，禁存明文 MinerU token）。
+- `dequeue_batch` 兼容返回 dict（worker 已改为经 `container.get_queue().claim()` 直接取）。
+"""
+from __future__ import annotations
 
 
-async def get_redis() -> aioredis.Redis:
-    global _pool
-    if _pool is None:
-        _pool = aioredis.ConnectionPool.from_url(
-            REDIS_URL,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=10,
-        )
-    return aioredis.Redis(connection_pool=_pool)
+async def get_redis():
+    """经 AppContainer 获取共享 Redis 客户端。"""
+    from app.interface.deps import get_container
+    return get_container().get_redis()
 
 
-async def enqueue_batch(batch_id: str, md5_list: list[str], token: str) -> None:
-    """将 batch_id + token 推入轮询队列"""
-    r = await get_redis()
-    payload = json.dumps({
-        "batch_id": batch_id,
-        "md5_list": md5_list,
-        "token": token,
-    })
-    await r.lpush(REDIS_QUEUE, payload)
+async def enqueue_batch(batch_id: str, md5_list: list[str], token_id: str) -> None:
+    """将 batch 推入 Streams 队列（payload 只含 token_id）。"""
+    from app.interface.deps import get_container
+    await get_container().get_queue().enqueue(batch_id, md5_list, token_id)
 
 
 async def dequeue_batch(timeout: int = 5) -> dict | None:
-    """阻塞式从队列取出一个 batch_id"""
-    r = await get_redis()
-    raw = await r.brpop(REDIS_QUEUE, timeout=timeout)
-    if raw is None:
+    """兼容封装：经 Streams 队列 claim 一条批，返回 dict。"""
+    from app.interface.deps import get_container
+    job = await get_container().get_queue().claim(timeout=timeout)
+    if job is None:
         return None
-    return json.loads(raw[1])
+    m = job.message
+    return {
+        "batch_id": m.batch_id,
+        "md5_list": m.md5_list,
+        "token_id": m.token_id,
+        "attempts": m.attempts,
+        "_entry_id": job.entry_id,
+    }

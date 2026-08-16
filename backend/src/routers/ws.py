@@ -6,7 +6,7 @@ from sqlalchemy import select
 from src.auth import decode_token
 from src.db import async_session
 from src.models import User
-from src.ws_manager import ws_manager
+from src.ws_manager import get_ws_registry
 
 router = APIRouter()
 
@@ -51,7 +51,8 @@ async def ws_documents(
             await websocket.close(code=4003, reason="Admin only")
             return
 
-    await ws_manager.connect(websocket, kb_id)
+    ws_registry = get_ws_registry()
+    await ws_registry.connect(websocket, kb_id)
     try:
         while True:
             await websocket.receive_text()
@@ -60,4 +61,4 @@ async def ws_documents(
     except Exception:
         pass
     finally:
-        ws_manager.disconnect(websocket, kb_id)
+        ws_registry.disconnect(websocket, kb_id)

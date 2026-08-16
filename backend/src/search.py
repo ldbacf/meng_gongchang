@@ -1,27 +1,18 @@
 """
-检索管线模块 — 双路召回 + RRF 融合 + Rerank 接口
+检索管线模块 — 双路召回 + RRF 融合 + Rerank 接口（阶段 1：经 AppContainer 取客户端）。
 
 用法:
     from src.search import search, rerank
 
     results = search("儿童用药政策", top_k=20)
-    results = rerank("儿童用药政策", results, model=my_reranker)
+    results = rerank("儿童用药政策", results)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.config import (
-    ES_HOST,
-    ES_PORT,
-    ES_USER,
-    ES_PASSWORD,
-    ES_INDEX,
-    MILVUS_HOST,
-    MILVUS_PORT,
-    MILVUS_COLLECTION,
-)
+from src.config import ES_INDEX, MILVUS_COLLECTION, USE_QUERY_EXPANSION
 
 
 @dataclass
@@ -48,34 +39,26 @@ class SearchHit:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 连接池（模块级单例）
+# 客户端获取（经 AppContainer，禁止模块级全局单例）
 # ═══════════════════════════════════════════════════════════════
 
-_ES_CLIENT = None
-_MILVUS_CONNECTED = False
+
+def get_es_client():
+    """获取 ES 客户端（容器管理生命周期）。替代旧 `_get_es`。"""
+    from app.interface.deps import get_container
+    return get_container().get_es().client
 
 
-def _get_es():
-    global _ES_CLIENT
-    if _ES_CLIENT is None:
-        from elasticsearch import Elasticsearch
-        kwargs = {"request_timeout": 30}
-        if ES_USER and ES_PASSWORD:
-            _ES_CLIENT = Elasticsearch(
-                f"http://{ES_USER}:{ES_PASSWORD}@{ES_HOST}:{ES_PORT}",
-                **kwargs,
-            )
-        else:
-            _ES_CLIENT = Elasticsearch(f"http://{ES_HOST}:{ES_PORT}", **kwargs)
-    return _ES_CLIENT
+def connect_milvus():
+    """连接 Milvus（容器管理生命周期）。替代旧 `_connect_milvus`。"""
+    from app.interface.deps import get_container
+    get_container().get_milvus().connect()
 
 
-def _connect_milvus():
-    global _MILVUS_CONNECTED
-    if not _MILVUS_CONNECTED:
-        from pymilvus import connections
-        connections.connect(host=MILVUS_HOST, port=MILVUS_PORT)
-        _MILVUS_CONNECTED = True
+def _get_embed_model():
+    """获取 bge-m3 嵌入模型（容器唯一工厂，单例）。"""
+    from app.interface.deps import get_container
+    return get_container().get_embedder().get_hf_embeddings()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -89,7 +72,7 @@ def _es_search(
     top_k: int = 200,
     es_index: str | None = None,
 ) -> list[SearchHit]:
-    es = _get_es()
+    es = get_es_client()
 
     must_clauses = [{"match": {"content": query}}]
     should_clauses = [
@@ -158,56 +141,35 @@ def _milvus_search(
     top_k: int = 200,
     milvus_collection: str | None = None,
 ) -> list[SearchHit]:
-    from pymilvus import Collection
+    from app.interface.deps import get_container
 
-    _connect_milvus()
-    collection = Collection(milvus_collection or MILVUS_COLLECTION)
-    collection.load()
+    mv = get_container().get_milvus()
+    mv.connect()
 
-    # 构建表达式过滤
-    expr_parts = []
-    if filters:
-        for key, val in filters.items():
-            if key == "level":
-                if isinstance(val, list):
-                    parts = [f'{key} == "{v}"' for v in val]
-                    expr_parts.append(f"({' || '.join(parts)})")
-                else:
-                    expr_parts.append(f'{key} == "{val}"')
-            elif key in ("chunk_type", "journal", "section", "article_type", "doi"):
-                expr_parts.append(f'{key} == "{val}"')
+    # 存量 4 字段通用集合无 level/chunk_type/doi/title_cn 字段，需精简 output_fields
+    use_full_fields = not (milvus_collection and milvus_collection != MILVUS_COLLECTION)
+    output_fields = None if use_full_fields else ["chunk_id", "doc_id", "title"]
 
-    expr = " && ".join(expr_parts) if expr_parts else None
-
-    results = collection.search(
-        data=[embedding],
-        anns_field="embedding",
-        param={"metric_type": "COSINE", "nprobe": 16},
-        limit=top_k,
-        expr=expr,
-        output_fields=["chunk_id", "doc_id", "title"],
-    ) if milvus_collection and milvus_collection != MILVUS_COLLECTION else collection.search(
-        data=[embedding],
-        anns_field="embedding",
-        param={"metric_type": "COSINE", "nprobe": 16},
-        limit=top_k,
-        expr=expr,
-        output_fields=["chunk_id", "doc_id", "level", "chunk_type", "doi", "title_cn"],
+    raw_hits = mv.search(
+        milvus_collection or MILVUS_COLLECTION,
+        embedding,
+        filters=filters,
+        top_k=top_k,
+        output_fields=output_fields,
     )
 
     hits = []
-    for rank, hit in enumerate(results[0]):
-        fields = hit.entity.fields
+    for raw in raw_hits:
         h = SearchHit(
-            chunk_id=fields.get("chunk_id", ""),
-            doc_id=fields.get("doc_id", ""),
-            level=fields.get("level", ""),
-            chunk_type=fields.get("chunk_type", ""),
-            doi=fields.get("doi", ""),
-            title=fields.get("title", ""),
-            title_cn=fields.get("title_cn", ""),
-            score_milvus=hit.score,
-            rank_milvus=rank + 1,
+            chunk_id=raw["chunk_id"],
+            doc_id=raw["doc_id"],
+            level=raw.get("level", ""),
+            chunk_type=raw.get("chunk_type", ""),
+            doi=raw.get("doi", ""),
+            title=raw.get("title", ""),
+            title_cn=raw.get("title_cn", ""),
+            score_milvus=raw["score"],
+            rank_milvus=raw["rank"],
         )
         hits.append(h)
 
@@ -267,17 +229,6 @@ def _rrf_fusion(
 # ═══════════════════════════════════════════════════════════════
 
 
-_EMBED_MODEL = None
-
-
-def _get_embed_model() -> "HuggingFaceEmbeddings":
-    global _EMBED_MODEL
-    if _EMBED_MODEL is None:
-        from src.llm import get_embedding_model
-        _EMBED_MODEL = get_embedding_model()
-    return _EMBED_MODEL
-
-
 def search(
     query: str,
     filters: dict | None = None,
@@ -289,19 +240,6 @@ def search(
 ) -> list[SearchHit]:
     """
     双路召回 + RRF 融合。
-
-    参数:
-        query: 搜索文本
-        filters: 过滤条件
-        top_k: 最终返回数
-        milvus_top_k: Milvus 初召数
-        es_top_k: ES 初召数
-        es_index: ES 索引名，默认用 config.ES_INDEX
-        milvus_collection: Milvus 集合名，默认用 config.MILVUS_COLLECTION
-        es_top_k: ES 初召数（翻倍）
-
-    返回:
-        list[SearchHit]，按 score_rrf 降序
     """
     model = _get_embed_model()
     # 短 query 重复嵌入以增强向量信号
@@ -339,17 +277,12 @@ def search_with_intent(
     intent = analyze_intent(query)
     search_query = intent.rewritten_query or query
 
-    from src.config import USE_QUERY_EXPANSION
-
     if USE_QUERY_EXPANSION:
         from src.query_expansion import expand_query
 
         expanded = expand_query(query)
         if expanded and expanded != query and len(expanded) > 5:
             search_query = f"{search_query} {expanded}"
-
-    hits = search(search_query, filters=filters, top_k=top_k, milvus_top_k=milvus_top_k, es_top_k=es_top_k)
-    return hits, intent
 
     hits = search(search_query, filters=filters, top_k=top_k, milvus_top_k=milvus_top_k, es_top_k=es_top_k)
     return hits, intent
@@ -361,7 +294,7 @@ def rerank(
     top_n: int | None = None,
 ) -> list[SearchHit]:
     """
-    精排 — 调用硅基流动 Qwen3-Reranker API 重排序。
+    精排 — 调用硅基流动 Qwen3-Reranker API 重排序（经容器工厂）。
 
     参数:
         query: 原始查询
@@ -382,10 +315,10 @@ def rerank(
 
     from langchain_core.documents import Document
 
-    from src.reranker import SiliconFlowReranker
+    from app.interface.deps import get_container
 
     n = top_n if top_n else len(with_content)
-    reranker = SiliconFlowReranker(top_n=n)
+    reranker = get_container().get_reranker(top_n=n)
 
     lc_docs = [
         Document(page_content=d.content, metadata={"hit_idx": i})
@@ -414,17 +347,6 @@ def search_and_answer(
 ) -> "AnswerResult | Generator[str, None, None]":
     """
     一键式：意图识别 → 双路检索 → RRF 融合 → Rerank → LLM 回答。
-    可通过环境变量 USE_QUERY_EXPANSION=true 启用口语→学术术语扩展。
-
-    参数:
-        query: 用户查询
-        filters: 过滤条件
-        top_k: 召回 top-K
-        stream: 是否流式输出
-
-    返回:
-        stream=False → AnswerResult
-        stream=True  → Generator[str, None, None]
     """
     hits, intent = search_with_intent(query, filters=filters, top_k=top_k)
     reranked = rerank(query, hits, top_n=5 if not stream else 10)

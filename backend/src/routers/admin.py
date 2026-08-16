@@ -26,7 +26,7 @@ from src.schemas import (
     UserResponse,
     UserUpdateRequest,
 )
-from src.ws_manager import broadcast_doc_update, ws_manager
+from src.ws_manager import broadcast_doc_update
 
 import fitz  # PyMuPDF
 
@@ -39,13 +39,14 @@ def _pdf_pages(data: bytes) -> int:
 
 
 async def _submit_one_file(fi: dict, db: AsyncSession):
-    """轻量单文件提交，不依赖 KeyManager"""
+    """轻量单文件提交 — 三阶段额度（reserve → submit → commit/refund）"""
+    from app.interface.deps import get_container
     from src.key_manager import TokenExhausted, get_key_manager
 
     key_mgr = get_key_manager()
+    vault = get_container().get_token_vault()
     try:
-        token = key_mgr.acquire(fi["pages"])
-        key_mgr.release(token, fi["pages"])
+        res = await key_mgr.acquire(fi["pages"])
     except TokenExhausted as e:
         stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
         r = await db.execute(stmt)
@@ -58,17 +59,30 @@ async def _submit_one_file(fi: dict, db: AsyncSession):
 
     from src import mineru_client
 
-    batch_id, md5_list = await mineru_client.submit_batch([fi], token=token)
-    stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
-    r = await db.execute(stmt)
-    t = r.scalar_one_or_none()
-    if t:
-        t.batch_id = batch_id
-        t.status = TaskStatus.PROCESSING
-    await db.commit()
+    token = vault.resolve(res.token_id)
+    try:
+        batch_id, md5_list = await mineru_client.submit_batch([fi], token=token)
+        stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
+        r = await db.execute(stmt)
+        t = r.scalar_one_or_none()
+        if t:
+            t.batch_id = batch_id
+            t.status = TaskStatus.PROCESSING
+        await db.commit()
+        await key_mgr.commit([res])
+    except Exception as e:
+        await key_mgr.refund([res])
+        stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
+        r = await db.execute(stmt)
+        t = r.scalar_one_or_none()
+        if t:
+            t.status = TaskStatus.FAILED
+            t.error_msg = str(e)
+        await db.commit()
+        raise
 
     from src.redis_client import enqueue_batch
-    await enqueue_batch(batch_id, md5_list, token=token)
+    await enqueue_batch(batch_id, md5_list, token_id=res.token_id)
 
 
 async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None, task_batch_id: str | None = None) -> None:
@@ -84,8 +98,8 @@ async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None, task_batch_i
         es_index = es_step.get("target_index")
         if es_index:
             try:
-                from src.search import _get_es
-                es = _get_es()
+                from src.search import get_es_client
+                es = get_es_client()
                 es.delete_by_query(
                     index=es_index,
                     body={"query": {"term": {"doc_id": es_doc_id}}},
@@ -101,8 +115,8 @@ async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None, task_batch_i
         if mv_collection:
             try:
                 from pymilvus import Collection
-                from src.search import _connect_milvus
-                _connect_milvus()
+                from src.search import connect_milvus
+                connect_milvus()
                 col = Collection(mv_collection)
                 col.delete(f'doc_id == "{es_doc_id}"')
             except Exception:
@@ -399,7 +413,8 @@ async def delete_document(
     await db.commit()
 
     if kb_id:
-        await ws_manager.broadcast(str(kb_id), {
+        from src.ws_manager import get_ws_registry
+        await get_ws_registry().broadcast(str(kb_id), {
             "type": "doc_deleted", "doc_id": str(doc_id),
         })
 
@@ -449,15 +464,14 @@ async def retry_document(
         await broadcast_doc_update(task)
 
         if task.batch_id:
-            from src.key_manager import get_key_manager
-            from src.redis_client import enqueue_batch
+            from app.interface.deps import get_container
+            from src.redis_client import enqueue_batch, get_redis
 
-            key_mgr = get_key_manager()
-            try:
-                token = next(iter(key_mgr._tokens)) if key_mgr._tokens else ""
-            except Exception:
-                token = ""
-            await enqueue_batch(task.batch_id, [task.md5], token=token)
+            # 优先用原 batch 的 token_id（worker 处理时写入 Redis），否则回退第一个可用 key
+            token_id = await get_redis().get(f"batch:{task.batch_id}")
+            if not token_id:
+                token_id = get_container().get_token_vault().first_id()
+            await enqueue_batch(task.batch_id, [task.md5], token_id=token_id)
     else:
         # chunking/embedding/es_write/milvus → 回到 PARSED，Worker 自动重跑
         task.status = TaskStatus.PARSED

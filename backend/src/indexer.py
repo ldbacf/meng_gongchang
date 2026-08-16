@@ -1,45 +1,41 @@
-"""通用知识库索引管线 — Chunk → Embed → ES + Milvus 写入"""
+"""通用知识库索引管线 — Chunk → Embed → ES + Milvus 写入（阶段 1：经 AppContainer）。
 
+- ES/Milvus schema 与规范脚本同源（`app/infrastructure/es/es_mappings.py`、
+  `app/infrastructure/milvus/schema.py`），杜绝双轨。
+- Milvus 按 chunk_id **先删后插**（幂等，图重跑/重索引安全）。
+"""
 from pathlib import Path
 
-from src.config import MINIO_PARSED_BUCKET
-from src.minio_client import get_minio
+from app.infrastructure.es.es_mappings import ES_SETTINGS, build_generic_kb_mapping
 
 
 def read_parsed_markdown(md5: str) -> str:
     """从 MinIO parsed-data/{md5}/ 读取 full.md"""
-    client = get_minio()
-    obj = client.get_object(MINIO_PARSED_BUCKET, f"{md5}/full.md")
-    return obj.read().decode("utf-8")
+    from src.minio_client import read_parsed_markdown as _read
+
+    return _read(md5)
 
 
 def es_bulk_write(
     es_index: str,
     chunks: list[dict],
 ) -> int:
-    """写入 ES 指定索引，不存在自动创建 mapping"""
-    from src.search import _get_es
+    """写入 ES 指定索引，不存在自动创建（在线自动建与 init_es 同源 mapping）。"""
+    from app.interface.deps import get_container
 
-    es = _get_es()
+    es = get_container().get_es().client
 
     if not es.indices.exists(index=es_index):
-        es.indices.create(index=es_index, body={
-            "settings": {"number_of_shards": 1, "number_of_replicas": 0},
-            "mappings": {
-                "properties": {
-                    "chunk_id": {"type": "keyword"},
-                    "doc_id": {"type": "keyword"},
-                    "level": {"type": "keyword"},
-                    "chunk_type": {"type": "keyword"},
-                    "title": {"type": "text"},
-                    "content": {"type": "text"},
-                    "heading_stack": {"type": "keyword"},
-                    "heading_depth": {"type": "integer"},
-                }
-            }
-        })
+        es.indices.create(
+            index=es_index,
+            body={
+                "settings": ES_SETTINGS,
+                "mappings": build_generic_kb_mapping(),
+            },
+        )
 
     from elasticsearch.helpers import bulk
+
     actions = [
         {
             "_index": es_index,
@@ -53,53 +49,12 @@ def es_bulk_write(
 
 
 def milvus_insert(collection_name: str, chunks: list[dict]) -> int:
-    """写入 Milvus 指定 collection，不存在自动创建"""
-    from pymilvus import (
-        Collection, CollectionSchema, DataType, FieldSchema,
-        connections, utility,
-    )
-    from src.search import _connect_milvus
+    """写入 Milvus 指定 collection（不存在自动创建，按 chunk_id 幂等 upsert）。"""
+    from app.interface.deps import get_container
 
-    _connect_milvus()
-
-    # 检查已有 collection 维度是否匹配
-    if utility.has_collection(collection_name):
-        existing = Collection(collection_name)
-        need_drop = False
-        for f in existing.schema.fields:
-            if f.name == "embedding" and hasattr(f, "params"):
-                if f.params.get("dim") != 1024:
-                    need_drop = True
-                break
-        if need_drop:
-            existing.release()
-            utility.drop_collection(collection_name)
-
-    if utility.has_collection(collection_name):
-        col = Collection(collection_name)
-    else:
-        schema = CollectionSchema([
-            FieldSchema("chunk_id", DataType.VARCHAR, max_length=256, is_primary=True),
-            FieldSchema("doc_id", DataType.VARCHAR, max_length=128),
-            FieldSchema("title", DataType.VARCHAR, max_length=256),
-            FieldSchema("embedding", DataType.FLOAT_VECTOR, dim=1024),
-        ], description="Generic KB collection")
-        col = Collection(collection_name, schema)
-        col.create_index(
-            "embedding",
-            {"metric_type": "COSINE", "index_type": "IVF_FLAT", "params": {"nlist": 1024}},
-        )
-
-    col.load()
-    ids = [c["chunk_id"] for c in chunks if c.get("vector")]
-    docs = [c["doc_id"] for c in chunks if c.get("vector")]
-    titles = [c.get("title", "") for c in chunks if c.get("vector")]
-    vecs = [c["vector"] for c in chunks if c.get("vector")]
-
-    if ids:
-        col.insert([ids, docs, titles, vecs])
-        col.flush()
-    return len(ids)
+    mv = get_container().get_milvus()
+    col = mv.ensure_collection(collection_name)
+    return mv.upsert_batch(col, chunks)
 
 
 def process_document(
@@ -151,8 +106,9 @@ def process_document(
 
     # Embed
     _step("embedding", "running")
-    from src.llm import get_embedding_model
-    model = get_embedding_model()
+    from app.interface.deps import get_container
+
+    model = get_container().get_embedder().get_hf_embeddings()
     for c in all_chunks:
         c["vector"] = model.embed_query(c["content"])
     _step("embedding", "done")

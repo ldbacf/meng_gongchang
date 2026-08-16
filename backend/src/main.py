@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 
+from app.interface.deps import get_container
 from src.config import CHUNK_SIZE, CORS_ORIGINS, MINIO_RAW_BUCKET, MINERU_BATCH_SIZE
 from src.db import async_session, engine
 from src.key_manager import TokenExhausted, get_key_manager
@@ -24,12 +25,9 @@ from src.schemas import TaskCreateResponse, TaskStatusResponse
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # schema 演进由 Alembic 管理（backend/alembic/）：新建库 `alembic upgrade head`，
-    # 已有库先 `alembic stamp 0002_checkpoint` 标记基线。此处仅做连通性校验。
-    from sqlalchemy import text as _sql_text
-
-    async with engine.begin() as conn:
-        await conn.execute(_sql_text("SELECT 1"))
-    await init_buckets()
+    # 已有库先 `alembic stamp 0002_checkpoint` 标记基线。此处仅做 DI 装配与启动。
+    container = get_container()
+    await container.start()  # DB 连通性校验 + MinIO 建桶 + bge-m3 预热（幂等）
 
     # 创建默认管理员
     from sqlalchemy import func as sql_func  # noqa: F811
@@ -86,13 +84,9 @@ async def lifespan(app: FastAPI):
             await session.commit()
             print(f"[API] 已回填 {len(orphan_docs)} 份文档到默认知识库")
 
-    # 预热 bge-m3 嵌入模型（启动时加载一次，后续常驻内存）
-    from src.llm import get_embedding_model
-    get_embedding_model()
-    print("[API] bge-m3 模型加载完成")
-    # 预热 KeyManager
+    # 预热 KeyManager（额度账本在 Redis）
     print("[API] KeyManager 启动:")
-    print(get_key_manager().usage_report())
+    print(await get_key_manager().usage_report())
 
     # 启动后台 Worker（MinerU 轮询 + 索引管线）
     import asyncio
@@ -108,6 +102,7 @@ async def lifespan(app: FastAPI):
         await _worker_task
     except asyncio.CancelledError:
         pass
+    await container.close()  # 统一 dispose（engine/redis/milvus/bge-m3）
 
 
 app = FastAPI(
@@ -144,12 +139,13 @@ async def _submit_batches(
     session,
 ):
     """
-    核心: 按 KeyManager 分配 token，每 10 个一批提交 MinerU。
+    核心: 按 KeyManager 分配 token，每 10 个一批提交 MinerU（三阶段额度）。
 
     to_submit: [{"name": "...", "data": b"...", "md5": "..."}]
     """
     key_mgr = get_key_manager()
-    # {token: [{"name": ..., "data": ..., "md5": ..., "pages": N}, ...]}
+    vault = get_container().get_token_vault()
+    # {token_id: [{"name": ..., "data": ..., "md5": ..., "pages": N, "res": Reservation}, ...]}
     groups: dict[str, list[dict]] = defaultdict(list)
     sorted_files = []
 
@@ -162,16 +158,13 @@ async def _submit_batches(
     # 大文件优先处理 (减少碎片)
     sorted_files.sort(key=lambda x: x["pages"], reverse=True)
 
-    # 先按 pages 排序，再逐个分配 token
-    # 分配时检查剩余容量，放不下就换 key
-    key_to_stash: dict[str, list[dict]] = defaultdict(list)  # 先暂存到各自 key
-
+    # 先按 pages 排序，再逐个 reserve 占额（跨进程一致，Redis 记账）
     for fi in sorted_files:
         pages = fi["pages"]
         try:
-            token = key_mgr.acquire(pages)
-            key_to_stash[token].append(fi)
-            key_mgr.release(token, pages)  # 预占额度
+            res = await key_mgr.acquire(pages)
+            fi["res"] = res
+            groups[res.token_id].append(fi)
         except TokenExhausted as e:
             print(f"[API] {e}")
             # 把未分配的标为失败
@@ -186,15 +179,19 @@ async def _submit_batches(
             continue
 
     # 每个 key 的文件分成 10 个一批提交
-    for token, files in key_to_stash.items():
+    for token_id, files in groups.items():
+        token = vault.resolve(token_id)
         for i in range(0, len(files), MINERU_BATCH_SIZE):
             chunk = files[i:i + MINERU_BATCH_SIZE]
             chunk_pages = sum(f["pages"] for f in chunk)
             print(f"[API] 提交 {len(chunk)} 个文件 "
-                  f"(token={token[:8]}..., 共{chunk_pages}页)")
+                  f"(token={token_id}, 共{chunk_pages}页)")
 
             try:
-                batch_id, md5_list = await submit_batch(chunk, token=token)
+                batch_id, md5_list = await submit_batch(
+                    [{k: f[k] for k in ("name", "data", "md5")} for f in chunk],
+                    token=token,
+                )
                 for fi in chunk:
                     stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
                     r = await session.execute(stmt)
@@ -203,11 +200,13 @@ async def _submit_batches(
                         t.batch_id = batch_id
                         t.status = TaskStatus.PROCESSING
                 await session.commit()
-                await enqueue_batch(batch_id, md5_list, token=token)
+                await key_mgr.commit([f["res"] for f in chunk])  # 提交成功 → commit
+                await enqueue_batch(batch_id, md5_list, token_id=token_id)
                 print(f"  [API] 完成 -> batch_id={batch_id}")
             except Exception as e:
                 traceback.print_exc()
                 print(f"[API] 批次提交失败: {e}")
+                await key_mgr.refund([f["res"] for f in chunk])  # 失败退回
                 for fi in chunk:
                     stmt = select(DocumentTask).where(DocumentTask.md5 == fi["md5"])
                     r = await session.execute(stmt)
@@ -521,9 +520,9 @@ async def _find_pdf_object_name(doc_id: str) -> str | None:
 
     # ── 3. 查 ES L0 chunk 反拿 md5 → 再去 MinIO 扫 ──
     try:
-        from src.search import _get_es
+        from src.search import get_es_client
 
-        es = _get_es()
+        es = get_es_client()
         resp = es.search(
             index=ES_INDEX,
             body={
@@ -639,9 +638,9 @@ def _try_minio_direct(doc_id: str) -> str | None:
 
     # 步骤 B: 查 ES L0 chunk 反拿 md5 → 再去 MinIO 按 md5 扫
     try:
-        from src.search import _get_es
+        from src.search import get_es_client
 
-        es = _get_es()
+        es = get_es_client()
 
         resp = es.search(
             index=ES_INDEX,
@@ -713,7 +712,7 @@ async def token_usage(_admin=Depends(require_admin)):
     """查看各 Token 当日额度用量（admin only）"""
     mgr = get_key_manager()
     return {
-        "tokens": mgr.usage_report(),
-        "exhausted": mgr.is_exhausted(),
-        "all_exhausted": mgr.is_exhausted(),
+        "tokens": await mgr.usage_report(),
+        "exhausted": await mgr.is_exhausted(),
+        "all_exhausted": await mgr.is_exhausted(),
     }
