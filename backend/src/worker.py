@@ -12,6 +12,7 @@ import time
 
 from sqlalchemy import select
 
+from app.domain.knowledge_base import KBKind, resolve_kb_kind
 from app.interface.deps import get_container
 from src.config import MAX_POLL_TIME, POLL_INTERVAL
 from src.db import async_session
@@ -36,12 +37,11 @@ STATE_LABELS = {
 
 
 def _step_update(task, step: str, status: str, **kwargs):
-    """在 task.pipeline_steps 里更新指定步骤状态"""
+    """在 task.pipeline_steps 里更新指定步骤状态（ts 统一 float，阶段 2 双轨合一）"""
     if task.pipeline_steps is None:
         return
-    import datetime as _dt
-    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
-    task.pipeline_steps[step] = {"status": status, "ts": now, **kwargs}
+    import time as _time
+    task.pipeline_steps[step] = {"status": status, "ts": _time.time(), **kwargs}
 
 
 async def _process_one_batch(batch_id: str, md5_list: list[str], token_id: str):
@@ -65,7 +65,7 @@ async def _process_one_batch(batch_id: str, md5_list: list[str], token_id: str):
                     r = await session.execute(stmt)
                     t = r.scalar_one_or_none()
                     if t:
-                        t.status = TaskStatus.FAILED
+                        t.set_status(TaskStatus.FAILED)
                         t.error_msg = str(e)
                         _step_update(t, "mineru", "failed", error=str(e))
                         await session.commit()
@@ -87,7 +87,7 @@ async def _process_one_batch(batch_id: str, md5_list: list[str], token_id: str):
                         r = await session.execute(stmt)
                         t = r.scalar_one_or_none()
                         if t:
-                            t.status = TaskStatus.FAILED
+                            t.set_status(TaskStatus.FAILED)
                             t.error_msg = err_msg
                             _step_update(t, "mineru", "failed", error=err_msg)
                             await session.commit()
@@ -116,7 +116,10 @@ async def _process_one_batch(batch_id: str, md5_list: list[str], token_id: str):
                         result = await session.execute(stmt)
                         task = result.scalar_one_or_none()
                         if task:
-                            task.status = TaskStatus.PARSED
+                            # 状态机推进：重跑场景 PENDING→PROCESSING→PARSED；正常 PROCESSING→PARSED
+                            if task.status == TaskStatus.PENDING.value:
+                                task.set_status(TaskStatus.PROCESSING)
+                            task.set_status(TaskStatus.PARSED)
                             task.parsed_minio_path = md_url
                             _step_update(task, "mineru", "done")
                             await session.commit()
@@ -131,17 +134,17 @@ async def _process_one_batch(batch_id: str, md5_list: list[str], token_id: str):
                                     )
                                 )
                                 kb = kb_result.scalar_one_or_none()
-                                if kb and kb.slug != "zhong_guo_quan_ke":
+                                if kb and resolve_kb_kind(kb) is not KBKind.MEDICAL_DEFAULT:
                                     # 用局部 dict 记录索引步骤状态，避免子线程摸 ORM 对象
-                                    import datetime as _dt
                                     import copy as _copy
+                                    import time as _time
                                     steps_ref = _copy.deepcopy(task.pipeline_steps) if task.pipeline_steps else {}
                                     def _local_step_update(step, status, **kw):
                                         if steps_ref is not None:
-                                            steps_ref[step] = {"status": status, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(), **kw}
+                                            steps_ref[step] = {"status": status, "ts": _time.time(), **kw}
 
                                     try:
-                                        task.status = TaskStatus.INDEXING
+                                        task.set_status(TaskStatus.INDEXING)
                                         await session.commit()
                                         await broadcast_doc_update(task)
 
@@ -155,13 +158,17 @@ async def _process_one_batch(batch_id: str, md5_list: list[str], token_id: str):
                                         # 将线程修改后的步骤状态写回 ORM 对象
                                         if steps_ref is not None:
                                             task.pipeline_steps = dict(steps_ref)
-                                        task.status = TaskStatus.READY
+                                        task.set_status(TaskStatus.READY)
                                         print(f"[Worker] {fname}: 索引完成 ({n} chunks)")
                                     except Exception as e:
-                                        task.status = TaskStatus.FAILED
+                                        task.set_status(TaskStatus.FAILED)
                                         task.error_msg = f"索引失败: {e}"
                                         if steps_ref is not None:
-                                            steps_ref[task.status.lower()] = {"status": "failed", "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(), "error": str(e)}
+                                            # 修复：把实际 running 步骤置 failed（原写 steps_ref["failed"] 垃圾 key）
+                                            for _sn, _st in steps_ref.items():
+                                                if isinstance(_st, dict) and _st.get("status") == "running":
+                                                    _st["status"] = "failed"
+                                                    _st["error"] = str(e)
                                             task.pipeline_steps = dict(steps_ref)
                                         print(f"[Worker] {fname}: 索引失败: {e}")
                                     await session.commit()
@@ -173,7 +180,7 @@ async def _process_one_batch(batch_id: str, md5_list: list[str], token_id: str):
                         result = await session.execute(stmt)
                         task = result.scalar_one_or_none()
                         if task:
-                            task.status = TaskStatus.FAILED
+                            task.set_status(TaskStatus.FAILED)
                             task.error_msg = str(e)
                             await session.commit()
                             await broadcast_doc_update(task)
@@ -187,7 +194,7 @@ async def _process_one_batch(batch_id: str, md5_list: list[str], token_id: str):
                     result = await session.execute(stmt)
                     task = result.scalar_one_or_none()
                     if task:
-                        task.status = TaskStatus.FAILED
+                        task.set_status(TaskStatus.FAILED)
                         task.error_msg = err
                         await session.commit()
                         await broadcast_doc_update(task)
@@ -200,7 +207,7 @@ async def _process_one_batch(batch_id: str, md5_list: list[str], token_id: str):
             result = await session.execute(stmt)
             task = result.scalar_one_or_none()
             if task:
-                task.status = TaskStatus.FAILED
+                task.set_status(TaskStatus.FAILED)
                 task.error_msg = "轮询超时"
                 await session.commit()
                 await broadcast_doc_update(task)

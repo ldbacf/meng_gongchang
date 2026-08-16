@@ -99,7 +99,7 @@ async def dedup_filter(pairs: list[dict]) -> list[dict]:
                 if row.status == TaskStatus.PROCESSING:
                     skip_running += 1
                     continue
-                row.status = TaskStatus.PENDING
+                row.reset(reason="rescan")  # 人为重开（重扫），非状态机迁移
                 row.error_msg = None
                 await s.commit()
         pages = fitz.open(stream=data, filetype="pdf").page_count
@@ -134,7 +134,7 @@ async def submit_all(files: list[dict]):
             async with async_session() as s:
                 row = (await s.execute(select(DocumentTask).where(DocumentTask.md5 == fi["md5"]))).scalar_one_or_none()
                 if row:
-                    row.status = TaskStatus.FAILED
+                    row.set_status(TaskStatus.FAILED)
                     row.error_msg = str(e)
                 await s.commit()
 
@@ -156,7 +156,7 @@ async def submit_all(files: list[dict]):
                     if row:
                         row.raw_minio_path = f"{MINIO_RAW_BUCKET}/{rp}"
                         row.meta_minio_path = f"{MINIO_META_BUCKET}/{mp}"
-                        row.status = TaskStatus.PENDING
+                        row.reset(reason="resubmit")  # 人为重开
                     else:
                         s.add(DocumentTask(
                             md5=fi["md5"], original_name=fi["pdf_path"].name,
@@ -174,7 +174,7 @@ async def submit_all(files: list[dict]):
                         row = (await s.execute(select(DocumentTask).where(DocumentTask.md5 == m))).scalar_one_or_none()
                         if row:
                             row.batch_id = bid
-                            row.status = TaskStatus.PROCESSING
+                            row.set_status(TaskStatus.PROCESSING)
                     await s.commit()
                 await km.commit([f["res"] for f in chunk])
                 await enqueue_batch(bid, md5s, token_id=token_id)
@@ -189,7 +189,7 @@ async def submit_all(files: list[dict]):
                     for fi in chunk:
                         row = (await s.execute(select(DocumentTask).where(DocumentTask.md5 == fi["md5"]))).scalar_one_or_none()
                         if row:
-                            row.status = TaskStatus.FAILED
+                            row.set_status(TaskStatus.FAILED)
                             row.error_msg = str(e)
                         await s.commit()
                 pbar.update(len(chunk))

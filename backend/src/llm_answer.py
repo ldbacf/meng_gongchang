@@ -4,11 +4,7 @@ LLM 回答生成 — reranked hits → 拼 context → DeepSeek-V4-Pro → 回�
 用法:
     from src.llm_answer import answer, answer_stream
 
-    # 非流式
-    result = answer("高血压怎么用药", reranked_hits, intent)
-    print(result.answer)
-
-    # 流式
+    result = answer("高血压怎么用药", reranked_hits)
     for token in answer_stream("高血压怎么用药", reranked_hits):
         print(token, end="")
 """
@@ -21,40 +17,12 @@ from typing import Generator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.domain.knowledge_base import KBKind
+from app.domain.rag.prompts import CONTEXT_TEMPLATE, GENERIC_SYSTEM_PROMPT, SYSTEM_PROMPT
 from src.config import DEEPSEEK_ANSWER_MODEL
 from src.llm import get_chat_model
 
 logger = logging.getLogger("llm_answer")
-
-# ═══════════════════════════════════════════════════════════════
-# Prompt
-# ═══════════════════════════════════════════════════════════════
-
-SYSTEM_PROMPT = """你是一个医学文献分析助手，基于提供的文献片段回答用户问题。
-
-规则：
-1. 只使用提供的文献信息回答，不编造内容
-2. 如果提供的文献信息不足以回答问题，明确说明"当前文献未涉及"或"信息不足"
-3. 引用来源用 [序号] 标注，例如"根据研究[1]显示..."。一处引用只标注一个序号，严禁写成 [1, 4] 或 [1][2] 等多序号形式；需要引用多条文献时，在句中分别用独立的 [序号] 标注
-4. 使用中文回答，专业简洁
-5. 综合多个文献片段的信息给出完整回答
-6. 如果用户使用了指代词（如"它""这个""上面"），请结合对话历史理解用户真实意图"""  # noqa: E501
-
-GENERIC_SYSTEM_PROMPT = """你是一个智能文档助手，基于提供的文档内容回答用户问题。
-
-规则：
-1. 只使用提供的文档内容回答，不编造内容
-2. 如果提供的文档内容不足以回答问题，请诚实说明
-3. 引用来源用 [序号] 标注，例如"根据研究[1]显示..."。一处引用只标注一个序号，严禁写成 [1, 4] 或 [1][2] 等多序号形式；需要引用多条文献时，在句中分别用独立的 [序号] 标注
-4. 使用中文回答，简洁清晰
-5. 综合多个文档片段的信息给出完整回答
-6. 如果用户使用了指代词（如"它""这个""上面"），请结合对话历史理解用户真实意图"""  # noqa: E501
-
-CONTEXT_TEMPLATE = """{history_block}以下是相关文献片段：
-
-{context}
-
-请基于以上文献回答：{query}"""
 
 
 def format_context(
@@ -116,7 +84,7 @@ def answer(
     intent: object | None = None,
     top_n: int = 5,
     stream: bool = False,
-    is_generic: bool = False,
+    kb_kind: KBKind = KBKind.MEDICAL_DEFAULT,
 ) -> AnswerResult | Generator[str, None, None]:
     """
     根据检索结果生成 LLM 回答。
@@ -125,13 +93,14 @@ def answer(
         query: 用户原始查询
         hits: rerank 后的 SearchHit 列表
         history: 对话历史 [{"role":"user"|"ai","content":"..."}] 最近 N 条
-        intent: 意图识别结果 (可选，用于信息展示)
+        intent: 意图识别结果 (可选)
         top_n: 取前 N 条有 content 的 hit 拼 context
         stream: 是否流式输出
+        kb_kind: 知识库类型（MEDICAL_DEFAULT→期刊 prompt；GENERIC→通用 prompt）
 
     返回:
         stream=False → AnswerResult
-        stream=True  → Generator[str, None, None] (逐 token yield)
+        stream=True  → Generator[str, None, None]
     """
     context = format_context(hits, top_n=top_n)
     if not context:
@@ -154,19 +123,19 @@ def answer(
     )
 
     if stream:
-        return _answer_stream(user_prompt, hits, intent, is_generic)
+        return _answer_stream(user_prompt, hits, intent, kb_kind)
 
-    return _answer_sync(user_prompt, hits, intent, is_generic)
+    return _answer_sync(user_prompt, hits, intent, kb_kind)
 
 
 def _answer_sync(
     user_prompt: str,
     hits: list,
     intent: object | None = None,
-    is_generic: bool = False,
+    kb_kind: KBKind = KBKind.MEDICAL_DEFAULT,
 ) -> AnswerResult:
     """非流式：等待完整回答后返回"""
-    sys_prompt = GENERIC_SYSTEM_PROMPT if is_generic else SYSTEM_PROMPT
+    sys_prompt = GENERIC_SYSTEM_PROMPT if kb_kind is KBKind.GENERIC else SYSTEM_PROMPT
     try:
         chat = get_chat_model(model=DEEPSEEK_ANSWER_MODEL, temperature=0.3, streaming=False)
         resp = chat.invoke([
@@ -183,10 +152,10 @@ def _answer_stream(
     user_prompt: str,
     hits: list,
     intent: object | None = None,
-    is_generic: bool = False,
+    kb_kind: KBKind = KBKind.MEDICAL_DEFAULT,
 ) -> Generator[str, None, None]:
     """流式：逐 token yield"""
-    sys_prompt = GENERIC_SYSTEM_PROMPT if is_generic else SYSTEM_PROMPT
+    sys_prompt = GENERIC_SYSTEM_PROMPT if kb_kind is KBKind.GENERIC else SYSTEM_PROMPT
     try:
         chat = get_chat_model(model=DEEPSEEK_ANSWER_MODEL, temperature=0.3, streaming=True)
         stream = chat.stream([
@@ -207,6 +176,7 @@ def answer_stream(
     hits: list,
     intent: object | None = None,
     top_n: int = 5,
+    kb_kind: KBKind = KBKind.MEDICAL_DEFAULT,
 ) -> Generator[str, None, None]:
     """流式回答的快捷入口，等价于 answer(..., stream=True)"""
-    return answer(query, hits, intent, top_n=top_n, stream=True)
+    return answer(query, hits, intent, top_n=top_n, stream=True, kb_kind=kb_kind)

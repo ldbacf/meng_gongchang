@@ -10,32 +10,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
 from src.config import ES_INDEX, MILVUS_COLLECTION, USE_QUERY_EXPANSION
 
-
-@dataclass
-class SearchHit:
-    chunk_id: str = ""
-    doc_id: str = ""
-    level: str = ""
-    chunk_type: str = ""
-    doi: str = ""
-    journal: str = ""
-    title_cn: str = ""
-    title: str = ""
-    section: str = ""
-    article_type: str = ""
-    heading_stack: list[str] = field(default_factory=list)
-    content: str = ""
-    html_body: str = ""
-    score_rrf: float = 0.0
-    score_rerank: float = 0.0
-    score_milvus: float = 0.0
-    score_es: float = 0.0
-    rank_milvus: int = 999999
-    rank_es: int = 999999
+# 阶段 2：SearchHit 契约统一来自 domain（re-export 兼容 test/ 手动脚本 `from src.search import SearchHit`）
+from app.domain.retrieval.search_hit import SearchHit  # noqa: F401
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -177,51 +155,8 @@ def _milvus_search(
 
 
 # ═══════════════════════════════════════════════════════════════
-# RRF 融合
+# RRF 融合（阶段 2：迁 domain，保留同 chunk_id 合并 + ES 字段回填语义）
 # ═══════════════════════════════════════════════════════════════
-
-
-def _rrf_fusion(
-    m_hits: list[SearchHit],
-    e_hits: list[SearchHit],
-    k: int = 20,
-    top_k: int = 100,
-) -> list[SearchHit]:
-    """RRF 融合去重，按 score_rrf 降序"""
-    merged: dict[str, SearchHit] = {}
-
-    for hit in m_hits:
-        cid = hit.chunk_id
-        if cid not in merged:
-            merged[cid] = hit
-        merged[cid].score_rrf += 1.0 / (k + hit.rank_milvus)
-
-    for hit in e_hits:
-        cid = hit.chunk_id
-        if cid not in merged:
-            merged[cid] = hit
-        merged[cid].score_es = hit.score_es
-        merged[cid].rank_es = hit.rank_es
-        merged[cid].score_rrf += 1.0 / (k + hit.rank_es)
-
-        # 从 ES 回填 Milvus 没有的字段
-        if hit.content:
-            merged[cid].content = hit.content
-        if hit.html_body:
-            merged[cid].html_body = hit.html_body
-        if hit.heading_stack:
-            merged[cid].heading_stack = hit.heading_stack
-        if hit.title:
-            merged[cid].title = hit.title
-        if hit.title_cn:
-            merged[cid].title_cn = hit.title_cn
-        if hit.journal:
-            merged[cid].journal = hit.journal
-        if hit.doi:
-            merged[cid].doi = hit.doi
-
-    sorted_hits = sorted(merged.values(), key=lambda x: x.score_rrf, reverse=True)
-    return sorted_hits[:top_k]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -249,7 +184,9 @@ def search(
     m_hits = _milvus_search(q_emb, filters=filters, top_k=milvus_top_k, milvus_collection=milvus_collection)
     e_hits = _es_search(query, filters=filters, top_k=es_top_k, es_index=es_index)
 
-    results = _rrf_fusion(m_hits, e_hits, top_k=top_k)
+    from app.domain.retrieval.rrf import rrf_fusion
+
+    results = rrf_fusion(m_hits, e_hits, top_k=top_k)
     return results
 
 

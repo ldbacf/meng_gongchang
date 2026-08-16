@@ -64,7 +64,8 @@ async def lifespan(app: FastAPI):
             kb = KnowledgeBase(
                 name="中国全科医学",
                 description="《中国全科医学》期刊文献库，收录1248篇论文，覆盖高血压、糖尿病、心血管、慢性病管理等全科医学领域",
-                slug="zhong_guo_quan_ke",
+                slug="zhong_guo_quan_ke",  # seed 标识（slug 仅此处使用，业务分支看 kb_kind）
+                kb_kind="medical_default",
                 es_index="chunks",
                 milvus_collection="chunks",
             )
@@ -173,7 +174,7 @@ async def _submit_batches(
                 r = await session.execute(stmt)
                 t = r.scalar_one_or_none()
                 if t:
-                    t.status = TaskStatus.FAILED
+                    t.set_status(TaskStatus.FAILED)
                     t.error_msg = f"所有 Key 额度用完: {e}"
             await session.commit()
             continue
@@ -198,7 +199,7 @@ async def _submit_batches(
                     t = r.scalar_one_or_none()
                     if t:
                         t.batch_id = batch_id
-                        t.status = TaskStatus.PROCESSING
+                        t.set_status(TaskStatus.PROCESSING)
                 await session.commit()
                 await key_mgr.commit([f["res"] for f in chunk])  # 提交成功 → commit
                 await enqueue_batch(batch_id, md5_list, token_id=token_id)
@@ -212,7 +213,7 @@ async def _submit_batches(
                     r = await session.execute(stmt)
                     t = r.scalar_one_or_none()
                     if t:
-                        t.status = TaskStatus.FAILED
+                        t.set_status(TaskStatus.FAILED)
                         t.error_msg = str(e)
                 await session.commit()
 
@@ -246,7 +247,7 @@ async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateRespons
                 message="秒传: 解析产物已存在",
             ), None
 
-        existing.status = TaskStatus.PENDING
+        existing.reset(reason="reupload")  # 人为重开（重传/重扫），非状态机迁移
         existing.error_msg = None
         await session.commit()
         return TaskCreateResponse(
@@ -263,7 +264,7 @@ async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateRespons
 
     raw_path = upload_raw_pdf(file_md5, filename, content)
     steps = default_pipeline_steps()
-    steps["upload"] = {"status": "done", "ts": _dt.now(_tz.utc).isoformat()}
+    steps["upload"] = {"status": "done", "ts": _dt.now(_tz.utc).timestamp()}  # ts 统一 float
     task = DocumentTask(
         kb_id=kb_id,
         md5=file_md5, original_name=filename,
@@ -322,7 +323,7 @@ async def upload_document(
             r = await session.execute(stmt)
             t = r.scalar_one_or_none()
             if t:
-                t.status = TaskStatus.FAILED
+                t.set_status(TaskStatus.FAILED)
                 t.error_msg = str(e)
                 await session.commit()
 
@@ -368,7 +369,7 @@ async def upload_documents_batch(
                     r = await session.execute(stmt)
                     t = r.scalar_one_or_none()
                     if t:
-                        t.status = TaskStatus.FAILED
+                        t.set_status(TaskStatus.FAILED)
                         t.error_msg = str(e)
                 await session.commit()
             for resp in responses:

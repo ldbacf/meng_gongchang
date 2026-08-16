@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from elasticsearch import Elasticsearch
 from sqlalchemy import select, func
+from app.domain.knowledge_base import KBKind
 from src.db import async_session
 from src.config import ES_HOST, ES_PORT, MINIO_RAW_BUCKET
 from src.models import DocumentTask, KnowledgeBase, TaskStatus, default_pipeline_steps
@@ -24,7 +25,7 @@ mc = get_minio()
 
 async def backfill():
     async with async_session() as db:
-        kb = (await db.execute(select(KnowledgeBase).where(KnowledgeBase.slug == "zhong_guo_quan_ke"))).scalar_one_or_none()
+        kb = (await db.execute(select(KnowledgeBase).where(KnowledgeBase.kb_kind == KBKind.MEDICAL_DEFAULT.value))).scalar_one_or_none()
         if not kb:
             print("默认知识库不存在，请先启动后端")
             return

@@ -9,6 +9,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.knowledge_base import KBKind, resolve_kb_kind
+from app.domain.retrieval.citation import build_citations
 from src.auth import get_current_user
 from src.db import get_db
 from src.models import Conversation, KnowledgeBase, Message, User
@@ -247,10 +249,10 @@ async def chat_stream(
                 lines.append(f"{role_label}：{m.content[:300]}")
             last_context = "\n".join(lines)
 
-        # Lookup KB for indexing/search targets
+        # Lookup KB for indexing/search targets（阶段 2：kb_kind 策略，不再用 slug 分支）
         es_idx = None
         mv_col = None
-        is_generic_kb = False
+        kb_kind = KBKind.MEDICAL_DEFAULT
         if req.kb_id:
             kb_result = await db.execute(
                 select(KnowledgeBase).where(KnowledgeBase.id == req.kb_id)
@@ -259,12 +261,12 @@ async def chat_stream(
             if kb:
                 es_idx = kb.es_index
                 mv_col = kb.milvus_collection
-                is_generic_kb = kb.slug != "zhong_guo_quan_ke"
+                kb_kind = resolve_kb_kind(kb)
 
         # Step 1: 意图识别
         t1 = time.perf_counter()
         yield _sl({"t":"step","k":"intent","s":"pending","title":"意图识别"})
-        intent = await asyncio.to_thread(analyze_intent, req.message, last_context, is_generic_kb)
+        intent = await asyncio.to_thread(analyze_intent, req.message, last_context, kb_kind)
         t1_end = time.perf_counter()
         yield _sl({
             "t":"step","k":"intent","s":"done","title":"意图识别",
@@ -355,7 +357,7 @@ async def chat_stream(
         yield _sl({"t":"step","k":"answer","s":"pending","title":"生成回答","elapsed_ms":0,"summary":"正在检索文献并生成回答..."})
         await asyncio.sleep(0)  # flush pending event before sync streaming loop
 
-        stream_gen = answer(req.message, reranked, history=history, intent=intent, top_n=5, stream=True, is_generic=is_generic_kb)
+        stream_gen = answer(req.message, reranked, history=history, intent=intent, top_n=5, stream=True, kb_kind=kb_kind)
         char_count = 0
         batch = ""
         for token in stream_gen:
@@ -398,42 +400,17 @@ async def chat_stream(
             },
         }
 
-        # Citations — 按 doc_id 去重，取前 5 篇不同文献
-        l0_meta = {} if is_generic_kb else _fetch_l0_meta(reranked)
-        citations = []
-        seen_docs: set[str] = set()
-        for hit in reranked:
-            if not hit.content or not hit.doc_id:
-                continue
-            if hit.doc_id in seen_docs:
-                continue
-            seen_docs.add(hit.doc_id)
-            if len(citations) >= 5:
-                break
-
-            extra = l0_meta.get(hit.doc_id, {}) if hit.doc_id else {}
-            if is_generic_kb:
-                title = hit.title or "未知文档"
-                journal = ""
-            else:
-                title = hit.title_cn or extra.get("title_cn") or "未知标题"
-                journal = hit.journal or extra.get("journal") or "中国全科医学"
-            source = journal or "通用知识库"
-            idx = len(citations) + 1
-            c = CitationSchema(
-                id=str(idx), title=title, source=source,
-                snippet=hit.content[:200] + ("..." if len(hit.content) > 200 else ""),
-                doc_id=str(hit.doc_id),
-                relevance=hit.score_rerank,
-            )
-            citations.append(c)
-            yield _sl({"t":"cite", **c.model_dump()})
+        # Citations — 按 doc_id 去重，取前 5 篇不同文献（阶段 2：domain CitationBuilder 纯函数）
+        l0_meta = {} if kb_kind is KBKind.GENERIC else _fetch_l0_meta(reranked)
+        citations = build_citations(reranked, l0_meta=l0_meta, kb_kind=kb_kind)
+        for c in citations:
+            yield _sl({"t": "cite", **c.to_dict()})
 
         # 保存 AI 消息
         ai_msg = Message(
             id=uuid.UUID(message_id), conversation_id=conv_id,
             role="ai", content=answer_text,
-            citations=[c.model_dump() for c in citations],
+            citations=[c.to_dict() for c in citations],
             rag_steps=rag_steps,
         )
         db.add(ai_msg)

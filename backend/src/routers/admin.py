@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.knowledge_base import KBKind, resolve_kb_kind
 from src.auth import hash_password, require_admin
 from src.config import MINIO_RAW_BUCKET
 from src.db import get_db
@@ -52,7 +53,7 @@ async def _submit_one_file(fi: dict, db: AsyncSession):
         r = await db.execute(stmt)
         t = r.scalar_one_or_none()
         if t:
-            t.status = TaskStatus.FAILED
+            t.set_status(TaskStatus.FAILED)
             t.error_msg = f"额度用完: {e}"
         await db.commit()
         return
@@ -67,7 +68,7 @@ async def _submit_one_file(fi: dict, db: AsyncSession):
         t = r.scalar_one_or_none()
         if t:
             t.batch_id = batch_id
-            t.status = TaskStatus.PROCESSING
+            t.set_status(TaskStatus.PROCESSING)
         await db.commit()
         await key_mgr.commit([res])
     except Exception as e:
@@ -76,7 +77,7 @@ async def _submit_one_file(fi: dict, db: AsyncSession):
         r = await db.execute(stmt)
         t = r.scalar_one_or_none()
         if t:
-            t.status = TaskStatus.FAILED
+            t.set_status(TaskStatus.FAILED)
             t.error_msg = str(e)
         await db.commit()
         raise
@@ -87,22 +88,27 @@ async def _submit_one_file(fi: dict, db: AsyncSession):
 
 async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None, task_batch_id: str | None = None) -> None:
     """删除 ES 和 Milvus 中属于该文档的全部 chunk。
-    优先用 task_batch_id（预置文献的 ES doc_id），否则用 md5。
+
+    阶段 2：doc_id 硬切点（契约口径 md5[:8]），删除按**双口径**兼容：
+    - `task_batch_id`：预置文献的 ES doc_id（article_id）；
+    - `md5[:8]`：统一后的契约 doc_id；
+    - `md5`：存量旧口径（在线通用 KB 曾用全 32 位 md5 作 doc_id）。
+    三者取并集删除，新旧 chunk 均能清理。
     """
-    es_doc_id = task_batch_id or md5
+    candidate_doc_ids = list(dict.fromkeys(filter(None, [task_batch_id, md5[:8], md5])))
     steps = pipeline_steps or {}
 
     # ES 清理
     es_step = steps.get("es_write", {})
     if es_step.get("status") == "done":
         es_index = es_step.get("target_index")
-        if es_index:
+        if es_index and candidate_doc_ids:
             try:
                 from src.search import get_es_client
                 es = get_es_client()
                 es.delete_by_query(
                     index=es_index,
-                    body={"query": {"term": {"doc_id": es_doc_id}}},
+                    body={"query": {"terms": {"doc_id": candidate_doc_ids}}},
                     refresh=True,
                 )
             except Exception:
@@ -112,13 +118,14 @@ async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None, task_batch_i
     mv_step = steps.get("milvus", {})
     if mv_step.get("status") == "done":
         mv_collection = mv_step.get("target_collection")
-        if mv_collection:
+        if mv_collection and candidate_doc_ids:
             try:
                 from pymilvus import Collection
                 from src.search import connect_milvus
                 connect_milvus()
                 col = Collection(mv_collection)
-                col.delete(f'doc_id == "{es_doc_id}"')
+                quoted = ", ".join(f'"{d}"' for d in candidate_doc_ids)
+                col.delete(f"doc_id in [{quoted}]")
             except Exception:
                 pass
 
@@ -262,6 +269,8 @@ async def create_knowledge_base(
         name=req.name,
         description=req.description,
         slug=req.slug,
+        # 阶段 2：新建 KB 一律 GENERIC（代码显式，不依赖列 server_default，防静默变 medical_default）
+        kb_kind=KBKind.GENERIC.value,
         es_index=es_index,
         milvus_collection=milvus_collection,
     )
@@ -289,7 +298,7 @@ async def delete_knowledge_base(
     kb = result.scalar_one_or_none()
     if not kb:
         raise HTTPException(404, "知识库不存在")
-    if kb.slug == "zhong_guo_quan_ke":
+    if resolve_kb_kind(kb) is KBKind.MEDICAL_DEFAULT:
         raise HTTPException(403, "默认知识库不可删除")
 
     # Unlink docs (set kb_id=NULL instead of cascade delete for safety)
@@ -336,7 +345,7 @@ async def upload_document(
     kb = kb_result.scalar_one_or_none()
     if not kb:
         raise HTTPException(404, "知识库不存在")
-    if kb.slug == "zhong_guo_quan_ke":
+    if resolve_kb_kind(kb) is KBKind.MEDICAL_DEFAULT:
         raise HTTPException(403, "默认知识库不支持上传文档，请新建知识库")
 
     content = await file.read()
@@ -383,7 +392,7 @@ async def upload_document(
         await db.refresh(task)
         await broadcast_doc_update(task)
     except Exception as e:
-        task.status = TaskStatus.FAILED
+        task.set_status(TaskStatus.FAILED)
         task.error_msg = str(e)
         await db.commit()
         await db.refresh(task)
@@ -458,7 +467,8 @@ async def retry_document(
     task.pipeline_steps = dict(steps)
 
     if retry_from == "mineru":
-        task.status = TaskStatus.PENDING
+        # 人为重开（重跑 MinerU 轮询），非状态机迁移
+        task.reset(reason="retry_mineru")
         task.error_msg = None
         await db.commit()
         await broadcast_doc_update(task)
@@ -473,10 +483,19 @@ async def retry_document(
                 token_id = get_container().get_token_vault().first_id()
             await enqueue_batch(task.batch_id, [task.md5], token_id=token_id)
     else:
-        # chunking/embedding/es_write/milvus → 回到 PARSED，Worker 自动重跑
-        task.status = TaskStatus.PARSED
+        # chunking/embedding/es_write/milvus → 人为重开到 PENDING 并重新入队，Worker 重跑
+        # （MinerU 已完成，重新下载产物 + 重索引，幂等；修复原"只改状态不入队"的静默 no-op）
+        task.reset(reason="retry_index")
         task.error_msg = None
         await db.commit()
         await broadcast_doc_update(task)
+        if task.batch_id:
+            from app.interface.deps import get_container
+            from src.redis_client import enqueue_batch, get_redis
+
+            token_id = await get_redis().get(f"batch:{task.batch_id}")
+            if not token_id:
+                token_id = get_container().get_token_vault().first_id()
+            await enqueue_batch(task.batch_id, [task.md5], token_id=token_id)
 
     return {"ok": True, "retry_from": retry_from}
