@@ -57,7 +57,7 @@ def migrated(pg_dsn):
     r = subprocess.run(
         ["uv", "run", "alembic", "upgrade", "head"],
         cwd=Path(__file__).resolve().parent.parent,
-        env=env, capture_output=True, text=True,
+        env=env, capture_output=True, text=True, encoding="utf-8",
     )
     assert r.returncode == 0, f"alembic 迁移失败: {r.stderr}"
     return True
@@ -95,7 +95,7 @@ def test_status_db_enum_sql_offline():
     r = subprocess.run(
         ["uv", "run", "alembic", "upgrade", "head", "--sql"],
         cwd=Path(__file__).resolve().parent.parent,
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
     )
     assert r.returncode == 0, r.stderr
     assert "ck_document_tasks_status" in r.stdout
