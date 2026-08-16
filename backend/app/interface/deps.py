@@ -1,9 +1,9 @@
 """接口层共享 FastAPI 依赖。
 
-- `get_container()`：DI 容器占位（阶段 1 由 AppContainer 实现，此处先提供惰性单例占位）。
+- `get_container()`：进程级 AppContainer 单例（lazy 创建，无客户端实例化副作用）。
+- `set_container()`：测试替换容器（注入 fake 客户端）。
 - `require_kb_access()`：KB 作用域授权依赖。admin 透传；非 admin 需用户-KB 关联
   （关联模型在阶段 2 建模、阶段 4 在 chat/document service 落实强校验）。
-  本阶段先提供机制并校验 KB 存在性，避免破坏现状非 admin 使用。
 """
 from __future__ import annotations
 
@@ -17,26 +17,23 @@ from src.auth import get_current_user
 from src.db import get_db
 from src.models import KnowledgeBase, User
 
+from app.infrastructure.container import AppContainer
 
-class _ContainerPlaceholder:
-    """阶段 1 前的容器占位。阶段 1 替换为 infrastructure.container.AppContainer。"""
-
-    def __getattr__(self, name: str):
-        raise RuntimeError(
-            f"AppContainer 尚未装配（阶段 1 落地）：{name}。"
-            "请先完成阶段 1「基础设施归位与 DI 容器」。"
-        )
+_container: AppContainer | None = None
 
 
-_container: _ContainerPlaceholder | None = None
-
-
-def get_container() -> _ContainerPlaceholder:
-    """获取 DI 容器。阶段 1 前为占位；阶段 1 起返回 AppContainer 单例。"""
+def get_container() -> AppContainer:
+    """获取进程级 DI 容器单例。"""
     global _container
     if _container is None:
-        _container = _ContainerPlaceholder()
+        _container = AppContainer()
     return _container
+
+
+def set_container(container: AppContainer | None) -> None:
+    """测试专用：替换进程级容器单例（传 None 重置为惰性重建）。"""
+    global _container
+    _container = container
 
 
 async def require_kb_access(

@@ -56,10 +56,19 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_url: str | None = None
     redis_queue: str = "mineru:poll_queue"
+    redis_queue_group: str = "mineru:poll_queue:group"
+    redis_queue_dlq: str = "mineru:poll_queue:dlq"
 
     @property
     def resolved_redis_url(self) -> str:
         return self.redis_url or f"redis://{self.redis_host}:{self.redis_port}"
+
+    # ── 可靠队列（Redis Streams）───────────────────────────────
+    # 可见性超时必须大于单批最坏处理时长（MAX_POLL_TIME 1200s + 下载/索引余量），
+    # 否则另一 worker 会误回收仍在正常处理的批。代价：kill-worker 恢复也要等这么久。
+    queue_visibility_timeout: int = 1800
+    # 超过该投递次数进 DLQ
+    queue_max_delivery: int = 3
 
     # ── MinIO ───────────────────────────────────────────────────
     minio_endpoint: str = "localhost:9000"
@@ -105,6 +114,9 @@ class Settings(BaseSettings):
     milvus_host: str = "localhost"
     milvus_port: int = 19530
     milvus_collection: str = "chunks"
+    # 向量维度 / 索引参数（与 scripts/init_milvus.py 共用唯一来源）
+    embedding_dim: int = 1024
+    milvus_nlist: int = 128
 
     # ── SiliconFlow Rerank ──────────────────────────────────────
     siliconflow_api_key: str = ""
