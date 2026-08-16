@@ -13,25 +13,20 @@ class Base(DeclarativeBase):
     pass
 
 
-class TaskStatus:
-    PENDING = "pending"
-    PROCESSING = "processing"
-    PARSED = "parsed"
-    INDEXING = "indexing"
-    READY = "ready"
-    FAILED = "failed"
-
+# 阶段 2：TaskStatus / 状态机迁移表 / pipeline_steps 契约统一来自 domain（阶段 0 冻结）。
+# str Enum（继承 str），`TaskStatus.PENDING.value == "pending"`，兼容既有 `== "pending"` 比较。
+from app.domain.document.pipeline_steps import (  # noqa: E402
+    PIPELINE_STEPS_ORDER,
+    default_pipeline_steps,
+)
+from app.domain.document.task_status import (  # noqa: E402
+    InvalidStatusTransition,
+    TaskStatus,
+    transition,
+)
 
 from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import JSONB
-
-PIPELINE_STEPS_ORDER = ["upload", "mineru", "chunking", "embedding", "es_write", "milvus"]
-
-
-def default_pipeline_steps() -> dict:
-    import datetime as _dt
-    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
-    return {s: {"status": "pending", "ts": now} for s in PIPELINE_STEPS_ORDER}
 
 
 class User(Base):
@@ -115,6 +110,10 @@ class KnowledgeBase(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     slug: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    # 阶段 2：KBKind 策略（medical_default / generic），分支判断不再用 slug
+    kb_kind: Mapped[str] = mapped_column(
+        String(32), default="medical_default", nullable=False, server_default="medical_default"
+    )
     es_index: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     milvus_collection: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -144,6 +143,18 @@ class DocumentTask(Base):
         String(32), default=TaskStatus.PENDING, nullable=False, index=True
     )
     batch_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # ── 状态机门面（阶段 2：双端校验，DB CHECK + 领域异常） ──
+
+    def set_status(self, target: TaskStatus | str) -> str:
+        """流水线正常迁移（走迁移表，非法抛 InvalidStatusTransition）。"""
+        self.status = transition(self.status, target).value
+        return self.status
+
+    def reset(self, reason: str = "") -> str:
+        """人为重开（重传/重扫/重试）——无条件回 PENDING，**非状态机迁移**。"""
+        self.status = TaskStatus.PENDING.value
+        return self.status
     pipeline_steps: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
