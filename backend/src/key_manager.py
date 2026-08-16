@@ -7,21 +7,16 @@
     manager.usage_report()              # 查看各 key 日用量
 """
 
-import os
 import time
 from datetime import date
 
-# 从 .env 读取，避免循环导入
-_TOKENS_ENV = (os.getenv("MINERU_TOKENS") or os.getenv("MINERU_API_TOKEN") or "")
-if "," in _TOKENS_ENV:
-    ALL_TOKENS = [t.strip() for t in _TOKENS_ENV.split(",") if t.strip()]
-elif _TOKENS_ENV:
-    ALL_TOKENS = [_TOKENS_ENV]
-else:
-    ALL_TOKENS = []
+# 从 app.infrastructure.settings 读取（单一真相源，含类型校验）
+from app.infrastructure.settings import get_settings
 
-MAX_PAGES_PER_KEY = int(os.getenv("MINERU_MAX_PAGES_PER_KEY", "1000"))
-BATCH_SIZE = int(os.getenv("MINERU_BATCH_SIZE", "10"))
+_settings = get_settings()
+ALL_TOKENS = _settings.mineru_token_list
+MAX_PAGES_PER_KEY = _settings.mineru_max_pages_per_key
+BATCH_SIZE = _settings.mineru_batch_size
 
 
 class TokenExhausted(Exception):

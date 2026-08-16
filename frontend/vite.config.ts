@@ -10,7 +10,8 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // 5173 在本机落入 Windows 保留端口段(5172-5271)无法绑定，改用 5171
+    port: 5171,
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',

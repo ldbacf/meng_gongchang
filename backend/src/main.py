@@ -16,28 +16,19 @@ from src.db import async_session, engine
 from src.key_manager import TokenExhausted, get_key_manager
 from src.mineru_client import submit_batch
 from src.minio_client import check_parsed_exists, get_minio, init_buckets, upload_raw_pdf
-from src.models import Base, DocumentTask, TaskStatus
+from src.models import DocumentTask, TaskStatus
 from src.redis_client import enqueue_batch
 from src.schemas import TaskCreateResponse, TaskStatusResponse
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # schema 演进由 Alembic 管理（backend/alembic/）：新建库 `alembic upgrade head`，
+    # 已有库先 `alembic stamp 0002_checkpoint` 标记基线。此处仅做连通性校验。
+    from sqlalchemy import text as _sql_text
+
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # Manual migration: add kb_id column to existing document_tasks
-        await conn.run_sync(lambda c: c.execute(
-            __import__("sqlalchemy").text(
-                "ALTER TABLE document_tasks ADD COLUMN IF NOT EXISTS "
-                "kb_id UUID"
-            )
-        ))
-        await conn.run_sync(lambda c: c.execute(
-            __import__("sqlalchemy").text(
-                "ALTER TABLE document_tasks ADD COLUMN IF NOT EXISTS "
-                "pipeline_steps JSONB"
-            )
-        ))
+        await conn.execute(_sql_text("SELECT 1"))
     await init_buckets()
 
     # 创建默认管理员
@@ -296,7 +287,7 @@ async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateRespons
 
 # ── 注册路由 ──────────────────────────────────────────────
 
-from src.auth import get_current_user  # noqa: E402
+from src.auth import get_current_user, require_admin  # noqa: E402
 from src.routers.auth import router as auth_router  # noqa: E402
 from src.routers.chat import router as chat_router  # noqa: E402
 from src.routers.admin import router as admin_router  # noqa: E402
@@ -311,7 +302,10 @@ app.include_router(ws_router)
 # ── API 端点 ──────────────────────────────────────────────────
 
 @app.post("/api/v1/documents", response_model=TaskCreateResponse)
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    _user=Depends(get_current_user),
+):
     async with async_session() as session:
         resp, fi = await _handle_one_file(file, session)
         if fi is None:
@@ -340,6 +334,7 @@ async def upload_document(file: UploadFile = File(...)):
 async def upload_documents_batch(
     files: list[UploadFile] = File(...),
     kb_id: str | None = Query(None),
+    _user=Depends(get_current_user),
 ):
     if len(files) > CHUNK_SIZE:
         raise HTTPException(400, f"单次最多 {CHUNK_SIZE} 个文件")
@@ -386,7 +381,10 @@ async def upload_documents_batch(
 
 
 @app.get("/api/v1/documents/{doc_id}", response_model=TaskStatusResponse)
-async def get_document_status(doc_id: uuid.UUID):
+async def get_document_status(
+    doc_id: uuid.UUID,
+    _user=Depends(get_current_user),
+):
     async with async_session() as session:
         stmt = select(DocumentTask).where(DocumentTask.id == doc_id)
         result = await session.execute(stmt)
@@ -397,7 +395,10 @@ async def get_document_status(doc_id: uuid.UUID):
 
 
 @app.get("/api/v1/documents/md5/{md5}", response_model=TaskStatusResponse)
-async def get_document_by_md5(md5: str):
+async def get_document_by_md5(
+    md5: str,
+    _user=Depends(get_current_user),
+):
     async with async_session() as session:
         stmt = select(DocumentTask).where(DocumentTask.md5 == md5)
         result = await session.execute(stmt)
@@ -708,8 +709,8 @@ async def health():
 
 
 @app.get("/api/v1/tokens/usage")
-async def token_usage():
-    """查看各 Token 当日额度用量"""
+async def token_usage(_admin=Depends(require_admin)):
+    """查看各 Token 当日额度用量（admin only）"""
     mgr = get_key_manager()
     return {
         "tokens": mgr.usage_report(),

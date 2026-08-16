@@ -24,6 +24,13 @@ async def ws_documents(
         await websocket.close(code=4001, reason="Invalid token")
         return
 
+    # 黑名单校验（登出后 token 立即失效）
+    from src.auth import is_token_blacklisted
+
+    if await is_token_blacklisted(token):
+        await websocket.close(code=4001, reason="Token revoked")
+        return
+
     user_id = payload.get("sub")
     if not user_id:
         await websocket.close(code=4001, reason="Missing user")

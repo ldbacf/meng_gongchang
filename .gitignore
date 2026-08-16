@@ -20,4 +20,8 @@ Thumbs.db
 .env
 node_modules/
 
-./docs
+# ── Python 测试产物 ──
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
