@@ -38,3 +38,20 @@ def env(**kwargs: str | None) -> Iterator[None]:
 @pytest.fixture
 def env_ctx() -> Any:
     return env
+
+
+@pytest.fixture
+def fake_redis_server():
+    """fakeredis 共享 server（可派生多个客户端模拟跨进程）。"""
+    import fakeredis
+
+    return fakeredis.FakeServer()
+
+
+@pytest.fixture
+def fake_redis(fake_redis_server):
+    """fakeredis 客户端（模拟 Redis；Streams 支持，PubSub 在 2.37 不支持）。"""
+    import fakeredis
+
+    r = fakeredis.aioredis.FakeRedis(server=fake_redis_server, decode_responses=True)
+    yield r
