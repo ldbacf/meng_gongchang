@@ -108,25 +108,23 @@ def test_answer_stream():
 
 
 def test_pipeline():
-    """search_and_answer 一键管线（需要 ES + Milvus 运行中）"""
-    from src.search import search_and_answer
+    """搜索→LLM 回答一键管线（需要 ES + Milvus 运行中）"""
+    from src.llm_answer import answer
+    from src.search import search
 
     print("\n" + "=" * 60)
-    print(f"  [Test] search_and_answer pipeline")
+    print(f"  [Test] search → answer pipeline")
     print(f"  Query: {QUERY}")
     print("=" * 60)
 
     try:
-        result = search_and_answer(QUERY, filters={"level": "L1"}, top_k=20)
+        hits = search(QUERY, filters={"level": "L1"}, top_k=20, es_index="chunks", milvus_collection="chunks")
+        result = answer(QUERY, hits, top_n=5, stream=False)
     except Exception as e:
         print(f"  [SKIP] 基础设施不可用 (ES/Milvus): {e}")
         print("  跳过管线测试，单元测试已覆盖 LLM 回答逻辑")
         return
 
-    print(f"\n  覆盖度: {result.intent.coverage if result.intent else 'N/A'}")
-    print(f"  领域: {result.intent.domain if result.intent else 'N/A'}")
-    if result.intent and result.intent.suggestion:
-        print(f"  提示: {result.intent.suggestion}")
     print(f"\n  来源数: {len(result.sources)}")
     print(f"\n  回答:\n{result.answer[:500]}")
 
@@ -136,16 +134,18 @@ def test_pipeline():
 
 
 def test_pipeline_stream():
-    """search_and_answer 管线流式（需要 ES + Milvus 运行中）"""
-    from src.search import search_and_answer
+    """搜索→LLM 回答流式（需要 ES + Milvus 运行中）"""
+    from src.llm_answer import answer
+    from src.search import search
 
     print("\n" + "=" * 60)
-    print(f"  [Test] search_and_answer (stream)")
+    print(f"  [Test] search → answer (stream)")
     print(f"  Query: 儿童发热怎么用药")
     print("=" * 60)
 
     try:
-        stream = search_and_answer("儿童发热怎么用药", filters={"level": "L1"}, top_k=20, stream=True)
+        hits = search("儿童发热怎么用药", filters={"level": "L1"}, top_k=20, es_index="chunks", milvus_collection="chunks")
+        stream = answer("儿童发热怎么用药", hits, top_n=5, stream=True)
     except Exception as e:
         print(f"  [SKIP] 基础设施不可用 (ES/Milvus): {e}")
         return

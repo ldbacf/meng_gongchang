@@ -1,7 +1,8 @@
-"""会话 & 聊天路由 — 会话 CRUD + SSE 流式 RAG"""
+"""会话 & 聊天路由 — 会话 CRUD + SSE 流式 RAG（阶段 4：驱动 QAGraph）。
 
-import asyncio
-import json
+阶段 4 收缩：`chat_stream` 不再内联 470 行串行管线，改经 `ChatService.stream_chat`
+驱动 QAGraph（图 = pipeline/编排唯一真相）。SSE 帧由 `interface/sse.py` 投影（v 信封）。
+"""
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,25 +10,19 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.knowledge_base import KBKind, resolve_kb_kind
-from app.domain.retrieval.citation import build_citations
+from app.interface.deps import get_container
+from app.interface.sse import to_sse
 from src.auth import get_current_user
 from src.db import get_db
-from src.models import Conversation, KnowledgeBase, Message, User
+from src.models import Conversation, Message, User
 from src.schemas import (
     ChatSendRequest,
-    CitationSchema,
     ConversationCreate,
     ConversationResponse,
     MessageResponse,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
-
-
-def _sl(data: dict) -> str:
-    """单行 SSE: data: {json}\n\n"""
-    return f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
 # ── 会话管理 ────────────────────────────────────────────────
@@ -164,262 +159,27 @@ async def list_messages(
     return list(reversed(messages))
 
 
-# ── SSE 流式 RAG ────────────────────────────────────────────
+# ── SSE 流式 RAG（驱动 QAGraph）──────────────────────────────
 
 
 @router.post("/chat/stream")
 async def chat_stream(
     req: ChatSendRequest,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ):
-    """SSE 流式 RAG 回答 — 逐步推送管线进度 + 回答 token"""
+    """SSE 流式 RAG — 驱动 QAGraph，逐帧推送 `{v:1, t:step|text|cite|done|error|heartbeat}`。
 
-    # 获取或创建会话
-    conv_id: uuid.UUID
-    if req.conversation_id:
-        try:
-            conv_id = uuid.UUID(req.conversation_id)
-        except ValueError:
-            raise HTTPException(400, "conversation_id 格式无效")
-        result = await db.execute(
-            select(Conversation).where(
-                Conversation.id == conv_id, Conversation.user_id == user.id
-            )
-        )
-        conv = result.scalar_one_or_none()
-        if not conv:
-            raise HTTPException(404, "会话不存在")
-    else:
-        title = req.message[:30] + ("..." if len(req.message) > 30 else "")
-        conv = Conversation(user_id=user.id, title=title)
-        db.add(conv)
-        await db.commit()
-        await db.refresh(conv)
-        conv_id = conv.id
+    入口（会话/KB 校验 + 落库用户消息）在 `ChatService._prepare` 内先行，
+    404/400 在返回 StreamingResponse 前抛出。
+    """
+    gen = await get_container().get_chat_service().stream_chat(req, user)
 
-    # 保存用户消息
-    user_msg = Message(
-        conversation_id=conv_id,
-        role="user",
-        content=req.message,
-    )
-    db.add(user_msg)
-    await db.commit()
-    await db.refresh(user_msg)
-
-    # 更新会话时间
-    conv.updated_at = func.now()
-    await db.commit()
-
-    async def event_generator():
-        import time
-
-        from src.llm_answer import answer
-        from src.query_intent import analyze_intent, IntentResult
-        from src.search import rerank, search
-
-        message_id = str(uuid.uuid4())
-        full_answer_parts: list[str] = []
-        rag_steps: dict = {}
-        t0 = time.perf_counter()
-
-        # ── Fetch history for multi-turn context ──
-        result = await db.execute(
-            select(Message)
-            .where(Message.conversation_id == conv_id)
-            .order_by(Message.created_at.asc()),
-        )
-        all_msgs = result.scalars().all()
-        prev_msgs = [m for m in all_msgs if m.id != user_msg.id]
-
-        # History list for answer (last 20 messages = 10 turns)
-        history = [
-            {"role": m.role, "content": m.content}
-            for m in prev_msgs[-20:]
-        ]
-
-        # Context for intent recognition (last 4 messages = 2 turns)
-        recent = prev_msgs[-4:]
-        last_context = ""
-        if recent:
-            lines = []
-            for m in recent:
-                role_label = "用户" if m.role == "user" else "AI"
-                lines.append(f"{role_label}：{m.content[:300]}")
-            last_context = "\n".join(lines)
-
-        # Lookup KB for indexing/search targets（阶段 2：kb_kind 策略，不再用 slug 分支）
-        es_idx = None
-        mv_col = None
-        kb_kind = KBKind.MEDICAL_DEFAULT
-        if req.kb_id:
-            kb_result = await db.execute(
-                select(KnowledgeBase).where(KnowledgeBase.id == req.kb_id)
-            )
-            kb = kb_result.scalar_one_or_none()
-            if kb:
-                es_idx = kb.es_index
-                mv_col = kb.milvus_collection
-                kb_kind = resolve_kb_kind(kb)
-
-        # Step 1: 意图识别
-        t1 = time.perf_counter()
-        yield _sl({"t":"step","k":"intent","s":"pending","title":"意图识别"})
-        intent = await asyncio.to_thread(analyze_intent, req.message, last_context, kb_kind)
-        t1_end = time.perf_counter()
-        yield _sl({
-            "t":"step","k":"intent","s":"done","title":"意图识别",
-            "elapsed_ms": round((t1_end - t1) * 1000),
-            "metrics": {
-                "domain": intent.domain or "通用",
-                "coverage": intent.coverage or "unknown",
-                "rewritten_query": intent.rewritten_query or req.message,
-                "keywords": intent.keywords or [],
-                "suggestion": intent.suggestion or "",
-            },
-        })
-        rag_steps["intent"] = {
-            "status": "completed", "title": "意图识别",
-            "elapsed_ms": round((t1_end - t1) * 1000),
-            "metrics": {
-                "domain": intent.domain or "通用",
-                "coverage": intent.coverage or "unknown",
-                "rewritten_query": intent.rewritten_query or req.message,
-                "keywords": intent.keywords or [],
-                "suggestion": intent.suggestion or "",
-            },
-        }
-
-        # Step 2: 混合检索
-        t2 = time.perf_counter()
-        yield _sl({"t":"step","k":"retrieval","s":"pending","title":"混合检索"})
-        search_query = intent.rewritten_query or req.message
-        hits = await asyncio.to_thread(
-            search, search_query, None, 20, 200, 200,
-            es_index=es_idx, milvus_collection=mv_col,
-        )
-        t2_end = time.perf_counter()
-        milvus_count = sum(1 for h in hits if h.rank_milvus != 999999)
-        es_count = sum(1 for h in hits if h.rank_es != 999999)
-        routing = "both" if milvus_count > 0 and es_count > 0 else "milvus_only" if milvus_count > 0 else "es_only"
-        milvus_docs = [h for h in hits if h.rank_milvus != 999999][:3]
-        es_docs = [h for h in hits if h.rank_es != 999999][:3]
-        overlap = milvus_count + es_count - len(hits)
-        yield _sl({
-            "t":"step","k":"retrieval","s":"done","title":"混合检索",
-            "elapsed_ms": round((t2_end - t2) * 1000),
-            "metrics": {
-                "milvus_hits": milvus_count, "es_hits": es_count,
-                "after_dedup": len(hits), "routing": routing,
-                "milvus_top_docs": [{"title": h.title or h.title_cn or "未知文献", "score": round(h.score_milvus, 3)} for h in milvus_docs],
-                "es_top_docs": [{"title": h.title or h.title_cn or "未知文献", "score": round(h.score_es, 3)} for h in es_docs],
-                "overlap": overlap,
-            },
-        })
-        rag_steps["retrieval"] = {
-            "status": "completed", "title": "混合检索",
-            "elapsed_ms": round((t2_end - t2) * 1000),
-            "metrics": {
-                "milvus_hits": milvus_count, "es_hits": es_count,
-                "after_dedup": len(hits), "routing": routing,
-                "milvus_top_docs": [{"title": h.title or h.title_cn or "未知文献", "score": round(h.score_milvus, 3)} for h in milvus_docs],
-                "es_top_docs": [{"title": h.title or h.title_cn or "未知文献", "score": round(h.score_es, 3)} for h in es_docs],
-                "overlap": overlap,
-            },
-        }
-
-        # Step 3: 融合重排
-        t3 = time.perf_counter()
-        yield _sl({"t":"step","k":"fusion","s":"pending","title":"融合重排"})
-        reranked = await asyncio.to_thread(rerank, req.message, hits, 5)
-        t3_end = time.perf_counter()
-        top_scores = [round(h.score_rerank, 3) for h in reranked[:5] if h.score_rerank > 0]
-        yield _sl({
-            "t":"step","k":"fusion","s":"done","title":"融合重排",
-            "elapsed_ms": round((t3_end - t3) * 1000),
-            "metrics": {
-                "input_count": len(hits), "output_count": len(reranked),
-                "model": "Qwen3-Reranker-4B", "top_scores": top_scores,
-            },
-        })
-        rag_steps["fusion"] = {
-            "status": "completed", "title": "融合重排",
-            "elapsed_ms": round((t3_end - t3) * 1000),
-            "metrics": {
-                "input_count": len(hits), "output_count": len(reranked),
-                "model": "Qwen3-Reranker-4B", "top_scores": top_scores,
-            },
-        }
-
-        # Step 4: 生成回答
-        t4 = time.perf_counter()
-        yield _sl({"t":"step","k":"answer","s":"pending","title":"生成回答","elapsed_ms":0,"summary":"正在检索文献并生成回答..."})
-        await asyncio.sleep(0)  # flush pending event before sync streaming loop
-
-        stream_gen = answer(req.message, reranked, history=history, intent=intent, top_n=5, stream=True, kb_kind=kb_kind)
-        char_count = 0
-        batch = ""
-        for token in stream_gen:
-            if isinstance(token, str):
-                full_answer_parts.append(token)
-                char_count += len(token)
-                batch += token
-                if len(batch) >= 20 or any(c in token for c in ("。", "！", "？", "\n", " ")):
-                    yield _sl({"t":"text","c":batch})
-                    batch = ""
-                if char_count % 50 < len(token) and char_count > 0:
-                    now = time.perf_counter()
-                    yield _sl({"t":"step","k":"answer","s":"pending","title":"生成回答",
-                               "elapsed_ms": round((now - t4) * 1000),
-                               "summary": f"已生成 {char_count} 字符..."})
-        if batch:
-            yield _sl({"t":"text","c":batch})
-
-        answer_text = "".join(full_answer_parts)
-        t4_end = time.perf_counter()
-        total_elapsed = round((t4_end - t0) * 1000)
-        yield _sl({
-            "t":"step","k":"answer","s":"done","title":"生成回答",
-            "elapsed_ms": round((t4_end - t4) * 1000),
-            "metrics": {
-                "model": "DeepSeek-V4-Pro",
-                "context_chunks": min(5, len(reranked)),
-                "total_tokens": len(answer_text),
-                "total_elapsed_ms": total_elapsed,
-            },
-        })
-        rag_steps["answer"] = {
-            "status": "completed","title": "生成回答",
-            "elapsed_ms": round((t4_end - t4) * 1000),
-            "metrics": {
-                "model": "DeepSeek-V4-Pro",
-                "context_chunks": min(5, len(reranked)),
-                "total_tokens": len(answer_text),
-                "total_elapsed_ms": total_elapsed,
-            },
-        }
-
-        # Citations — 按 doc_id 去重，取前 5 篇不同文献（阶段 2：domain CitationBuilder 纯函数）
-        l0_meta = {} if kb_kind is KBKind.GENERIC else _fetch_l0_meta(reranked)
-        citations = build_citations(reranked, l0_meta=l0_meta, kb_kind=kb_kind)
-        for c in citations:
-            yield _sl({"t": "cite", **c.to_dict()})
-
-        # 保存 AI 消息
-        ai_msg = Message(
-            id=uuid.UUID(message_id), conversation_id=conv_id,
-            role="ai", content=answer_text,
-            citations=[c.to_dict() for c in citations],
-            rag_steps=rag_steps,
-        )
-        db.add(ai_msg)
-        await db.commit()
-
-        yield _sl({"t":"done", "conversation_id": str(conv_id), "message_id": message_id})
+    async def _sse():
+        async for frame in gen:
+            yield to_sse(frame)
 
     return StreamingResponse(
-        event_generator(),
+        _sse(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -427,42 +187,3 @@ async def chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
-
-
-def _fetch_l0_meta(hits: list) -> dict[str, dict]:
-    """批量查询 ES L0 chunk 回填 title_cn / journal / md5"""
-    from src.search import get_es_client
-
-    doc_ids = sorted({h.doc_id for h in hits if h.doc_id and not h.title_cn})
-    if not doc_ids:
-        return {}
-
-    try:
-        es = get_es_client()
-        resp = es.search(
-            index="chunks",
-            body={
-                "size": len(doc_ids),
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"terms": {"doc_id": doc_ids}},
-                            {"term": {"level": "L0"}},
-                        ]
-                    }
-                },
-                "_source": ["doc_id", "title_cn", "journal", "md5"],
-            },
-        )
-        result: dict[str, dict] = {}
-        for hit in resp.get("hits", {}).get("hits", []):
-            src = hit["_source"]
-            did = src.get("doc_id", "")
-            result[did] = {
-                "title_cn": src.get("title_cn", ""),
-                "journal": src.get("journal", ""),
-                "md5": src.get("md5", ""),
-            }
-        return result
-    except Exception:
-        return {}

@@ -290,7 +290,7 @@ app.include_router(ws_router)
 @app.post("/api/v1/documents", response_model=TaskCreateResponse)
 async def upload_document(
     file: UploadFile = File(...),
-    _user=Depends(get_current_user),
+    _admin=Depends(require_admin),
 ):
     async with async_session() as session:
         resp, fi = await _handle_one_file(file, session)
@@ -320,7 +320,7 @@ async def upload_document(
 async def upload_documents_batch(
     files: list[UploadFile] = File(...),
     kb_id: str | None = Query(None),
-    _user=Depends(get_current_user),
+    _admin=Depends(require_admin),
 ):
     if len(files) > CHUNK_SIZE:
         raise HTTPException(400, f"单次最多 {CHUNK_SIZE} 个文件")

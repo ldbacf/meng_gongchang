@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from src.config import ES_INDEX, MILVUS_COLLECTION, USE_QUERY_EXPANSION
+from src.config import ES_INDEX, MILVUS_COLLECTION
 
 # 阶段 2：SearchHit 契约统一来自 domain（re-export 兼容 test/ 手动脚本 `from src.search import SearchHit`）
 from app.domain.retrieval.search_hit import SearchHit  # noqa: F401
@@ -168,6 +168,28 @@ def _milvus_search(
 # ═══════════════════════════════════════════════════════════════
 
 
+def recall_dual(
+    query: str,
+    filters: dict | None = None,
+    milvus_top_k: int = 200,
+    es_top_k: int = 200,
+    es_index: str | None = None,
+    milvus_collection: str | None = None,
+) -> tuple[list[SearchHit], list[SearchHit]]:
+    """双路初召（embed + ES BM25 + Milvus COSINE），返回 `(milvus_hits, es_hits)`，**不做 RRF**。
+
+    阶段 4：供 QAGraph 的 retrieval 节点调用，后续由 fusion 节点 `rrf_fusion` 独立融合
+    （保留"embed 独立 + rrf 独立"语义与按步 metric）。短 query（<15 字）重复嵌入增强向量信号。
+    """
+    model = _get_embed_model()
+    embed_query = f"{query} {query}" if len(query) < 15 else query
+    q_emb = model.embed_query(embed_query)
+
+    m_hits = _milvus_search(q_emb, filters=filters, top_k=milvus_top_k, milvus_collection=milvus_collection)
+    e_hits = _es_search(query, filters=filters, top_k=es_top_k, es_index=es_index)
+    return m_hits, e_hits
+
+
 def search(
     query: str,
     filters: dict | None = None,
@@ -180,53 +202,15 @@ def search(
     """
     双路召回 + RRF 融合。
     """
-    model = _get_embed_model()
-    # 短 query 重复嵌入以增强向量信号
-    embed_query = f"{query} {query}" if len(query) < 15 else query
-    q_emb = model.embed_query(embed_query)
-
-    m_hits = _milvus_search(q_emb, filters=filters, top_k=milvus_top_k, milvus_collection=milvus_collection)
-    e_hits = _es_search(query, filters=filters, top_k=es_top_k, es_index=es_index)
+    m_hits, e_hits = recall_dual(
+        query, filters=filters,
+        milvus_top_k=milvus_top_k, es_top_k=es_top_k,
+        es_index=es_index, milvus_collection=milvus_collection,
+    )
 
     from app.domain.retrieval.rrf import rrf_fusion
 
-    results = rrf_fusion(m_hits, e_hits, top_k=top_k)
-    return results
-
-
-def search_with_intent(
-    query: str,
-    filters: dict | None = None,
-    top_k: int = 20,
-    milvus_top_k: int = 200,
-    es_top_k: int = 200,
-) -> tuple[list[SearchHit], "IntentResult"]:
-    """
-    意图识别 + 双路召回 + RRF 融合。
-
-    先调用 DeepSeek-V4-Flash 分析 query 意图并重写，
-    再用重写后的 query 做检索，最终返回 (hits, intent)。
-    意图识别失败时降级为原始 query 直搜。
-
-    可通过环境变量 USE_QUERY_EXPANSION=true 启用口语→学术术语扩展。
-
-    返回:
-        (list[SearchHit], IntentResult)
-    """
-    from src.query_intent import analyze_intent, IntentResult
-
-    intent = analyze_intent(query)
-    search_query = intent.rewritten_query or query
-
-    if USE_QUERY_EXPANSION:
-        from src.query_expansion import expand_query
-
-        expanded = expand_query(query)
-        if expanded and expanded != query and len(expanded) > 5:
-            search_query = f"{search_query} {expanded}"
-
-    hits = search(search_query, filters=filters, top_k=top_k, milvus_top_k=milvus_top_k, es_top_k=es_top_k)
-    return hits, intent
+    return rrf_fusion(m_hits, e_hits, top_k=top_k)
 
 
 def rerank(
@@ -278,26 +262,3 @@ def rerank(
 
     reranked = sorted(with_content, key=lambda x: x.score_rerank, reverse=True)
     return reranked + without_content
-
-
-def search_and_answer(
-    query: str,
-    filters: dict | None = None,
-    top_k: int = 10,
-    stream: bool = False,
-) -> "AnswerResult | Generator[str, None, None]":
-    """
-    一键式：意图识别 → 双路检索 → RRF 融合 → Rerank → LLM 回答。
-    """
-    hits, intent = search_with_intent(query, filters=filters, top_k=top_k)
-    reranked = rerank(query, hits, top_n=5 if not stream else 10)
-
-    from src.llm_answer import answer
-
-    return answer(
-        query=query,
-        hits=reranked,
-        intent=intent,
-        top_n=5,
-        stream=stream,
-    )

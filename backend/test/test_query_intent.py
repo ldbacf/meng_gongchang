@@ -87,7 +87,9 @@ def test_intent_only() -> bool:
 
 
 def test_pipeline() -> bool:
-    from src.search import search_with_intent, rerank
+    from src.query_intent import analyze_intent
+    from src.search import search, rerank
+    from app.domain.knowledge_base import KBKind
 
     print("\n" + "=" * 65)
     print("  测试 2: 意图识别 + 检索链路")
@@ -101,8 +103,14 @@ def test_pipeline() -> bool:
     for query in queries:
         print(f"\n  ── Query: {query} ──")
 
-        # Step 1: 意图识别 + 检索
-        hits, intent = search_with_intent(query, filters={"level": "L1"}, top_k=10)
+        # Step 1: 意图识别
+        intent = analyze_intent(query, "", KBKind.MEDICAL_DEFAULT)
+        # Step 2: 检索（阶段 4 收敛为 QAGraph；此处保持声明式链路）
+        hits = search(
+            intent.rewritten_query or query,
+            filters={"level": "L1"}, top_k=10,
+            es_index="chunks", milvus_collection="chunks",
+        )
 
         print(f"  领域    : {intent.domain}")
         print(f"  覆盖度  : {intent.coverage}")

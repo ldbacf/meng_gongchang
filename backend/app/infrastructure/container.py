@@ -39,6 +39,8 @@ class AppContainer:
         self._submission_service = None
         self._delete_service = None
         self._retry_service = None
+        self._rag_graph = None
+        self._chat_service = None
         self._started = False
         self._closed = False
 
@@ -305,6 +307,29 @@ class AppContainer:
             self._retry_service = RetryService(self)
         return self._retry_service
 
+    # ── 阶段 4：QAGraph + ChatService ─────────────────────────────
+
+    def get_rag_graph(self):
+        """QAGraph（compile 挂 checkpointer，C3）。"""
+        f = self._fake("rag_graph")
+        if f is not None:
+            return f
+        if self._rag_graph is None:
+            from app.application.graphs.rag.rag_graph import build_rag_graph
+
+            self._rag_graph = build_rag_graph(self.get_checkpointer())
+        return self._rag_graph
+
+    def get_chat_service(self):
+        f = self._fake("chat_service")
+        if f is not None:
+            return f
+        if self._chat_service is None:
+            from app.application.services.chat_service import ChatService
+
+            self._chat_service = ChatService(self)
+        return self._chat_service
+
     # ── 生命周期 ───────────────────────────────────────────
 
     async def start(self) -> None:
@@ -409,5 +434,7 @@ class AppContainer:
         self._submission_service = None
         self._delete_service = None
         self._retry_service = None
+        self._rag_graph = None
+        self._chat_service = None
         self._started = False
         self._closed = True
