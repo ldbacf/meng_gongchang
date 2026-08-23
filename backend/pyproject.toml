@@ -62,6 +62,8 @@ packages = ["src", "app"]
 pipeline-api = "src.main:app"
 # 阶段 3：独立 worker 进程（驱动 IngestionGraph）
 pipeline-worker = "app.application.worker:main"
+# 阶段 4 前置：bge-m3 独立常驻服务（模型只加载一次）
+embedding-server = "app.application.embedding_server:run"
 
 [[tool.uv.index]]
 name = "pytorch-cu124"

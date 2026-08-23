@@ -9,6 +9,7 @@ read_markdown → chunk_document(domain 唯一入口) → embed_batch → es_wri
 """
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from langgraph.graph import END, START, StateGraph
@@ -24,6 +25,7 @@ from app.application.graphs.nodes._task import (
 )
 from app.application.graphs.state import IndexDocState
 from app.domain.knowledge_base import resolve_kb_kind
+from app.infrastructure.adapters.embedding_http import EmbeddingServiceError
 from app.infrastructure.adapters.mineru import MineruTransientError
 from src.indexer import es_bulk_write
 
@@ -82,8 +84,12 @@ async def chunk_document_node(state: IndexDocState) -> dict:
 async def embed_batch(state: IndexDocState) -> dict:
     from app.interface.deps import get_container
 
-    model = get_container().get_embedder().get_hf_embeddings()
-    vectors = model.embed_documents([c["content"] for c in state["chunks"]])
+    model = get_container().get_embedder()
+    # bge-m3 推理（local）/ HTTP 请求（remote）均为同步阻塞，移出 event loop。
+    # model.embed_documents 既适配 EmbeddingFactory（local）也适配 HttpEmbeddingPort（remote）。
+    vectors = await asyncio.to_thread(
+        model.embed_documents, [c["content"] for c in state["chunks"]]
+    )
     await update_steps(state["md5"], "embedding", "done", count=len(vectors))
     return {"vectors": [list(v) for v in vectors]}
 
@@ -121,7 +127,7 @@ async def milvus_write(state: IndexDocState) -> dict:
 
 
 _TRANSIENT = RetryPolicy(
-    retry_on=lambda e: isinstance(e, MineruTransientError),
+    retry_on=lambda e: isinstance(e, (MineruTransientError, EmbeddingServiceError)),
     max_attempts=3,
 )
 

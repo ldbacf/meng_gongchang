@@ -34,9 +34,13 @@ def connect_milvus():
 
 
 def _get_embed_model():
-    """获取 bge-m3 嵌入模型（容器唯一工厂，单例）。"""
+    """获取 bge-m3 嵌入器（容器唯一 factory/port）。
+
+    remote 模式为 HttpEmbeddingPort（HTTP 调独立服务），local 为 EmbeddingFactory
+    （进程内加载）；两者皆实现 embed_query/embed_documents，调用方签名不变。
+    """
     from app.interface.deps import get_container
-    return get_container().get_embedder().get_hf_embeddings()
+    return get_container().get_embedder()
 
 
 # ═══════════════════════════════════════════════════════════════

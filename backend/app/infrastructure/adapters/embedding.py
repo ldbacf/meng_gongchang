@@ -49,6 +49,17 @@ class EmbeddingFactory:
             self._st = SentenceTransformer(self._model_path(), **kw)
         return self._st
 
+    # ── EmbeddingPort 实现（local 模式经 get_embedder() 统一暴露）─
+    # get_hf_embeddings() 返回的 LangChain HuggingFaceEmbeddings 原生具备
+    # embed_query / embed_documents；这里再委托一次，让 EmbeddingFactory
+    # 与 HttpEmbeddingPort（remote）对外接口完全一致。
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.get_hf_embeddings().embed_query(text)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.get_hf_embeddings().embed_documents(texts)
+
     def release(self) -> None:
         """释放模型引用（close 时调用）。"""
         self._hf = None

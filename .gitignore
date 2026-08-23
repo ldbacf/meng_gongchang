@@ -25,3 +25,4 @@ node_modules/
 .coverage.*
 htmlcov/
 .pytest_cache/
+./docs/error_ok

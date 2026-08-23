@@ -174,9 +174,15 @@ class AppContainer:
         if f is not None:
             return f
         if self._embedder is None:
-            from app.infrastructure.adapters.embedding import EmbeddingFactory
+            s = self.get_settings()
+            if s.embedding_mode == "remote":
+                from app.infrastructure.adapters.embedding_http import HttpEmbeddingPort
 
-            self._embedder = EmbeddingFactory()
+                self._embedder = HttpEmbeddingPort(s.embedding_service_url)
+            else:
+                from app.infrastructure.adapters.embedding import EmbeddingFactory
+
+                self._embedder = EmbeddingFactory()
         return self._embedder
 
     def get_llm(self):
@@ -313,9 +319,16 @@ class AppContainer:
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
         await self.get_minio().init_buckets()
-        # 预热 bge-m3（启动加载一次，后续常驻）
-        self.get_embedder().get_hf_embeddings()
-        print("[API] bge-m3 模型加载完成")
+        # 预热 bge-m3：local 模式启动加载一次常驻；
+        # remote 模式只做 /health 探测（模型已在 embedding-service 端常驻，本进程不再加载）。
+        if self.get_settings().embedding_mode == "remote":
+            if self.get_embedder().check_health():
+                print("[API] embedding-service 就绪")
+            else:
+                print("[API] 警告: embedding-service 不可达（检索/索引将失败，请先起 embedding-server）")
+        else:
+            self.get_embedder().get_hf_embeddings()
+            print("[API] bge-m3 模型加载完成")
 
         # 阶段 3：checkpoint saver（AsyncPostgresSaver，表已由 Alembic 0002 建好）
         # 创建失败降级（如 Windows ProactorEventLoop 下 psycopg 不可用）——

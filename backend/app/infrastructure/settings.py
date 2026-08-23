@@ -118,6 +118,12 @@ class Settings(BaseSettings):
     embedding_dim: int = 1024
     milvus_nlist: int = 128
 
+    # ── Embedding Service（bge-m3 独立常驻服务）─────────────────
+    # "local"（默认）= 进程内加载模型（现状/单测/未起服务）
+    # "remote" = 调独立 embedding-service（HTTP），模型只加载一次
+    embedding_mode: str = "local"
+    embedding_service_url: str = "http://localhost:8084"
+
     # ── SiliconFlow Rerank ──────────────────────────────────────
     siliconflow_api_key: str = ""
     siliconflow_base_url: str = "https://api.siliconflow.cn/v1"

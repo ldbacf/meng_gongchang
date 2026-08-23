@@ -161,3 +161,17 @@ services:
         condition: service_healthy
       milvus:
         condition: service_healthy
+
+  # 阶段 4 前置：bge-m3 独立常驻服务（模型只加载一次，供 API/worker 经 HTTP 调用）。
+  # 与 worker 同 profile（`docker compose --profile worker up`）；宿主已挂载 4.3G 模型，
+  # 不需在镜像内复制。镜像构建/健康检查阶段 5 完善。本地开发用 `uv run embedding-server`。
+  embedding-service:
+    profiles: ["worker"]
+    build:
+      context: .
+    command: ["uv", "run", "uvicorn", "app.application.embedding_server:app", "--host", "0.0.0.0", "--port", "8084"]
+    restart: unless-stopped
+    volumes:
+      - ./models:/app/models
+    ports:
+      - "8084:8084"
