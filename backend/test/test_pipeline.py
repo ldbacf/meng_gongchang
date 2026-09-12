@@ -4,7 +4,7 @@
 前置:
   1. docker compose up -d       (启动 PostgreSQL / Redis / MinIO)
   2. uv run uvicorn src.main:app --port 8000   (启动 API)
-  3. uv run python -m src.worker               (启动 Worker)
+  3. uv run pipeline-worker                     (启动 Worker)
 
 用法:
   uv run python test_pipeline.py

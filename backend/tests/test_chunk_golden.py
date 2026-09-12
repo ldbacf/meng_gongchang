@@ -1,17 +1,16 @@
 """T-2.7 — chunk_document golden 回归（重构前冻结基线，搬家式重构后不得回归）。
 
-- golden 基线路径：`tests/golden/sample_chunks.json`（用当前 src.chunker.chunk_document
-  在重构**前**跑 sample fixtures 冻结）。
+- golden 基线路径：`tests/golden/sample_chunks.json`（重构**前**跑 sample fixtures 冻结）。
 - 覆盖：完整 L0（标题/摘要/关键词）、L1 分段（按标题边界）、L2 表格（v2 表注回填、
   表引用段落）、doc_id=article_id 口径。
-- `src/chunker` 重构后为转发层，本测试 import 路径不变，持续回归。
+- 直接 import domain 唯一入口（`src.chunker` 转发层已随阶段 5 清理移除）。
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from src.chunker import chunk_document
+from app.domain.chunking.chunk_document import chunk_document
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 _GOLDEN = Path(__file__).parent / "golden"

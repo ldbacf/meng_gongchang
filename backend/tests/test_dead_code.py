@@ -50,3 +50,30 @@ def test_fetch_l0_meta_uses_kb_es_index():
     assert 'index="chunks"' not in text
     cite_text = _read("app/application/graphs/rag/nodes/cite.py")
     assert "fetch_l0_meta(reranked, es_index=kb.get(\"es_index\"))" in cite_text
+
+
+def test_legacy_src_shims_removed():
+    """重构遗留的零引用转发 shim 已删除（阶段 5 收尾）。
+
+    - src/reranker.py / src/worker.py / src/mineru_client.py：纯转发、零引用。
+    - src/chunker.py：仅测试引用，测试已改为直接 import domain 入口。
+    """
+    for gone in ("src/reranker.py", "src/worker.py", "src/mineru_client.py", "src/chunker.py"):
+        assert not (_ROOT / gone).exists(), f"遗留 shim 未删除: {gone}"
+
+
+def test_main_has_no_dead_imports():
+    """src/main.py 不再 import 已无引用的符号（阶段 5 收尾发现的死 import）。"""
+    text = _read("src/main.py")
+    for sym in ("from src.mineru_client import", "TokenExhausted",
+                "init_buckets,", "MINERU_BATCH_SIZE",
+                "from src.db import async_session, engine",
+                "from collections import defaultdict"):
+        assert sym not in text, f"src/main.py 仍有死 import: {sym}"
+
+
+def test_scripts_dir_gone():
+    """scripts/ 目录已退役（内容全部迁入 cli/）。"""
+    scripts = _ROOT / "scripts"
+    leftover = [p.name for p in scripts.rglob("*")] if scripts.exists() else []
+    assert leftover == [], f"scripts/ 仍有残留: {leftover}"

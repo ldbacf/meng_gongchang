@@ -4,7 +4,6 @@ import hashlib
 import re
 import traceback
 import uuid
-from collections import defaultdict
 from contextlib import asynccontextmanager
 
 import fitz  # PyMuPDF
@@ -14,11 +13,10 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, select
 
 from app.interface.deps import get_container
-from src.config import CHUNK_SIZE, CORS_ORIGINS, MINIO_RAW_BUCKET, MINERU_BATCH_SIZE
-from src.db import async_session, engine
-from src.key_manager import TokenExhausted, get_key_manager
-from src.mineru_client import submit_batch
-from src.minio_client import check_parsed_exists, get_minio, init_buckets, upload_raw_pdf
+from src.config import CHUNK_SIZE, CORS_ORIGINS, MINIO_RAW_BUCKET
+from src.db import async_session
+from src.key_manager import get_key_manager
+from src.minio_client import check_parsed_exists, get_minio, upload_raw_pdf
 from src.models import DocumentTask, TaskStatus
 from src.redis_client import enqueue_batch
 from src.schemas import TaskCreateResponse, TaskStatusResponse
@@ -200,6 +198,33 @@ async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateRespons
             message="重试: 重新提交解析",
         ), {"name": filename, "data": content, "md5": file_md5}
 
+    # ── 新文件：落 raw-docs + 建 task（提交解析由调用方经 SubmissionService 完成）──
+    from datetime import datetime as _dt, timezone as _tz
+
+    from src.models import default_pipeline_steps
+
+    raw_path = upload_raw_pdf(file_md5, filename, content)
+    steps = default_pipeline_steps()
+    steps["upload"] = {"status": "done", "ts": _dt.now(_tz.utc).timestamp()}  # ts 统一 float
+    task = DocumentTask(
+        kb_id=kb_id,
+        md5=file_md5, original_name=filename,
+        raw_minio_path=f"{MINIO_RAW_BUCKET}/{raw_path}",
+        status=TaskStatus.PENDING,
+        pipeline_steps=steps,
+    )
+    session.add(task)
+    await session.commit()
+    await session.refresh(task)
+
+    return TaskCreateResponse(
+        id=task.id, md5=task.md5,
+        original_name=task.original_name,
+        status=task.status,
+        raw_minio_path=task.raw_minio_path,
+        message="新文件: 待提交解析",
+    ), {"name": filename, "data": content, "md5": file_md5}
+
 
 async def _copy_across_kb(
     existing, file_md5: str, filename: str, content: bytes, kb_id, session,
@@ -251,32 +276,6 @@ async def _copy_across_kb(
         id=task.id, md5=task.md5, original_name=task.original_name,
         status=task.status, raw_minio_path=task.raw_minio_path,
         message="跨知识库复制: 待提交解析",
-    ), {"name": filename, "data": content, "md5": file_md5}
-
-    # 新文件
-    from datetime import datetime as _dt, timezone as _tz
-    from src.models import default_pipeline_steps
-
-    raw_path = upload_raw_pdf(file_md5, filename, content)
-    steps = default_pipeline_steps()
-    steps["upload"] = {"status": "done", "ts": _dt.now(_tz.utc).timestamp()}  # ts 统一 float
-    task = DocumentTask(
-        kb_id=kb_id,
-        md5=file_md5, original_name=filename,
-        raw_minio_path=f"{MINIO_RAW_BUCKET}/{raw_path}",
-        status=TaskStatus.PENDING,
-        pipeline_steps=steps,
-    )
-    session.add(task)
-    await session.commit()
-    await session.refresh(task)
-
-    return TaskCreateResponse(
-        id=task.id, md5=task.md5,
-        original_name=task.original_name,
-        status=task.status,
-        raw_minio_path=task.raw_minio_path,
-        message="新文件: 待提交解析",
     ), {"name": filename, "data": content, "md5": file_md5}
 
 
