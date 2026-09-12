@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from app.application.graphs.rag.nodes._emit import emit_done
 from app.interface.deps import get_container
-from src.models import Conversation, Message
+from app.infrastructure.db.models import Conversation, Message
 
 
 async def persist(state: dict) -> dict:

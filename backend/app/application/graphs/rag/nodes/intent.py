@@ -23,7 +23,7 @@ async def intent(state: dict) -> dict:
     kb_kind = KBKind(kb.get("kb_kind", "medical_default"))
     last_context = last_context_from_history(state.get("history") or [])
 
-    from src.query_intent import analyze_intent
+    from app.infrastructure.adapters.query_intent import analyze_intent
 
     t0 = time.perf_counter()
     await emit_step("intent", "pending")
@@ -42,7 +42,7 @@ async def intent(state: dict) -> dict:
 
     expanded_query = None
     if get_container().get_settings().use_query_expansion:
-        from src.query_expansion import expand_query
+        from app.infrastructure.adapters.query_expansion import expand_query
 
         exp = await asyncio.to_thread(expand_query, query)
         if exp and exp != query:

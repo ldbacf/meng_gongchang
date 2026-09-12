@@ -2,7 +2,7 @@
 查询术语扩展模块 — 适配层（LLM 调用），prompt/解析在 `app/domain/rag/query_expansion.py`。
 
 用法:
-    from src.query_expansion import expand_query
+    from app.infrastructure.adapters.query_expansion import expand_query
 
     expanded = expand_query("一天吃七八种药会不会互相影响")
 """

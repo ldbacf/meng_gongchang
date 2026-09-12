@@ -27,7 +27,7 @@ from app.application.graphs.state import IndexDocState
 from app.domain.knowledge_base import resolve_kb_kind
 from app.infrastructure.adapters.embedding_http import EmbeddingServiceError
 from app.infrastructure.adapters.mineru import MineruTransientError
-from src.indexer import es_bulk_write
+from app.infrastructure.indexer import es_bulk_write
 
 
 async def load_context(state: IndexDocState) -> dict:
@@ -48,7 +48,7 @@ async def load_context(state: IndexDocState) -> dict:
     if task.kb_id:
         from sqlalchemy import select
 
-        from src.models import KnowledgeBase
+        from app.infrastructure.db.models import KnowledgeBase
 
         async with get_container().get_db_sessionmaker()() as session:
             r = await session.execute(select(KnowledgeBase).where(KnowledgeBase.id == task.kb_id))
@@ -118,7 +118,7 @@ async def milvus_write(state: IndexDocState) -> dict:
         target_collection=state["milvus_collection"], count=written,
     )
     await mark_ready(state["md5"])  # INDEXING→READY
-    from src.ws_manager import broadcast_doc_update
+    from app.infrastructure.ws_manager import broadcast_doc_update
 
     task = await load_task(state["md5"])
     if task:

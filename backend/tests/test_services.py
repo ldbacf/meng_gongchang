@@ -12,7 +12,7 @@ from app.application.services.document_deletion import (
 )
 from app.infrastructure.container import AppContainer
 from app.interface.deps import set_container
-from src.models import DocumentTask, KnowledgeBase, TaskStatus
+from app.infrastructure.db.models import DocumentTask, KnowledgeBase, TaskStatus
 
 
 @pytest.fixture
@@ -62,7 +62,7 @@ async def kb_env():
 async def test_cross_kb_copy_preserves_original(kb_env):
     """T-3.6: 跨 KB 重传复制新 task，原 task kb_id 不变（禁止 reassign 归属漂移）。"""
     container, kb_a, kb_b, task = kb_env
-    from src.main import _copy_across_kb
+    from app.main import _copy_across_kb
 
     async with container.get_db_sessionmaker()() as session:
         resp, fi = await _copy_across_kb(

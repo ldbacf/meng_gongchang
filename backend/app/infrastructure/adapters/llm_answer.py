@@ -2,7 +2,7 @@
 LLM 回答生成 — reranked hits → 拼 context → DeepSeek-V4-Pro → 回答
 
 用法:
-    from src.llm_answer import answer, answer_stream
+    from app.infrastructure.adapters.llm_answer import answer, answer_stream
 
     result = answer("高血压怎么用药", reranked_hits)
     for token in answer_stream("高血压怎么用药", reranked_hits):

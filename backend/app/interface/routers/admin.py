@@ -10,15 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.knowledge_base import KBKind, resolve_kb_kind
 from app.infrastructure.settings import get_settings
-from src.auth import hash_password, require_admin
-from src.db import get_db
-from src.models import (
+from app.interface.security import hash_password, require_admin
+from app.infrastructure.db.session import get_db
+from app.infrastructure.db.models import (
     DocumentTask,
     KnowledgeBase,
     TaskStatus,
     User,
 )
-from src.schemas import (
+from app.interface.schemas import (
     DocumentResponse,
     KBCreateRequest,
     KBResponse,
@@ -26,7 +26,7 @@ from src.schemas import (
     UserResponse,
     UserUpdateRequest,
 )
-from src.ws_manager import broadcast_doc_update
+from app.infrastructure.ws_manager import broadcast_doc_update
 
 import fitz  # PyMuPDF
 
@@ -67,7 +67,7 @@ async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None, task_batch_i
         es_index = es_step.get("target_index")
         if es_index and candidate_doc_ids:
             try:
-                from src.search import get_es_client
+                from app.infrastructure.search import get_es_client
                 es = get_es_client()
                 es.delete_by_query(
                     index=es_index,
@@ -84,7 +84,7 @@ async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None, task_batch_i
         if mv_collection and candidate_doc_ids:
             try:
                 from pymilvus import Collection
-                from src.search import connect_milvus
+                from app.infrastructure.search import connect_milvus
                 connect_milvus()
                 col = Collection(mv_collection)
                 quoted = ", ".join(f'"{d}"' for d in candidate_doc_ids)
@@ -328,7 +328,7 @@ async def upload_document(
     existing = existing_result.scalar_one_or_none()
     if existing:
         if existing.kb_id != kb_id:
-            from src.main import _copy_across_kb
+            from app.main import _copy_across_kb
 
             resp, _fi = await _copy_across_kb(
                 existing, file_md5, file.filename or "unknown", content, kb_id, db,
@@ -347,7 +347,7 @@ async def upload_document(
     raw_path = minio.upload_raw_pdf(
         file_md5, file.filename or "unknown", content
     )
-    from src.models import default_pipeline_steps
+    from app.infrastructure.db.models import default_pipeline_steps
     steps = default_pipeline_steps()
     steps["upload"] = {"status": "done", "ts": datetime.now(timezone.utc).isoformat()}
     task = DocumentTask(
@@ -408,7 +408,7 @@ async def delete_document(
     await db.commit()
 
     if kb_id:
-        from src.ws_manager import get_ws_registry
+        from app.infrastructure.ws_manager import get_ws_registry
         await get_ws_registry().broadcast(str(kb_id), {
             "type": "doc_deleted", "doc_id": str(doc_id),
         })
@@ -423,7 +423,7 @@ async def retry_document(
     db: AsyncSession = Depends(get_db),
 ):
     """从第一个失败的步骤重试"""
-    from src.models import PIPELINE_STEPS_ORDER
+    from app.infrastructure.db.models import PIPELINE_STEPS_ORDER
 
     result = await db.execute(select(DocumentTask).where(DocumentTask.id == doc_id))
     task = result.scalar_one_or_none()

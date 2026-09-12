@@ -58,9 +58,9 @@ def test_cli_modules_exist():
 
 
 def test_cli_reuses_pipeline_seams():
-    # import_milvus：复用 src.indexer.milvus_insert（不内联模型编码）
+    # import_milvus：复用 app.infrastructure.indexer.milvus_insert（不内联模型编码）
     assert "milvus_insert" in _imported_names("import_milvus.py")
-    # import_es：复用 src.indexer.es_bulk_write（不内联 helpers.bulk）
+    # import_es：复用 app.infrastructure.indexer.es_bulk_write（不内联 helpers.bulk）
     assert "es_bulk_write" in _imported_names("import_es.py")
     # run_chunker：复用 domain 唯一切分入口
     assert "chunk_document" in _imported_names("run_chunker.py")

@@ -2,7 +2,7 @@
 检索管线模块 — 双路召回 + RRF 融合 + Rerank 接口（阶段 1：经 AppContainer 取客户端）。
 
 用法:
-    from src.search import search, rerank
+    from app.infrastructure.search import search, rerank
 
     results = search("儿童用药政策", top_k=20)
     results = rerank("儿童用药政策", results)
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from app.infrastructure.settings import get_settings
 
-# 阶段 2：SearchHit 契约统一来自 domain（re-export 兼容 test/ 手动脚本 `from src.search import SearchHit`）
+# 阶段 2：SearchHit 契约统一来自 domain（re-export 兼容 test/ 手动脚本 `from app.infrastructure.search import SearchHit`）
 from app.domain.retrieval.search_hit import SearchHit  # noqa: F401
 
 

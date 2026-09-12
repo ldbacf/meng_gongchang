@@ -1,4 +1,4 @@
-"""批量导入 chunk JSON 到 Milvus — 复用容器 embedder + `src.indexer.milvus_insert`。
+"""批量导入 chunk JSON 到 Milvus — 复用容器 embedder + `app.infrastructure.indexer.milvus_insert`。
 
 原 `scripts/import_milvus.py` 内联 `model.encode()` + `collection.upsert()`（**第三条并行路径**）；
 收敛后：编码经容器唯一 embedder（`get_embedder().embed_query/embed_documents`），
@@ -86,7 +86,7 @@ def main() -> None:
         logger.info("全部已完成，无需导入")
         return
 
-    from src.indexer import milvus_insert
+    from app.infrastructure.indexer import milvus_insert
 
     logger.info("模式: %s | 共 %d 个文件 → collection %s", args.mode, len(pending), args.collection)
     stats = {"rows": 0, "errors": 0}

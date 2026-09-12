@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from src.models import DocumentTask, TaskStatus
+from app.infrastructure.db.models import DocumentTask, TaskStatus
 
 
 class DocumentBusyError(Exception):

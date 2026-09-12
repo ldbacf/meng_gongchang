@@ -6,7 +6,7 @@ ProactorEventLoop**（Python 3.8+ 在 Windows 的默认循环）：
 
     InterfaceError: Psycopg cannot use the 'ProactorEventLoop' to run in async mode.
 
-后果：直接 `uvicorn src.main:app` 起服务时，checkpointer 建不出来 → QAGraph 不可用
+后果：直接 `uvicorn app.main:app` 起服务时，checkpointer 建不出来 → QAGraph 不可用
 （`get_checkpointer()` 抛错）→ **问答功能挂掉**（启动日志会出现"警告: Postgres
 checkpointer 创建失败"）。
 
@@ -43,7 +43,7 @@ def main() -> None:
 
     import uvicorn
 
-    uvicorn.run("src.main:app", host=args.host, port=args.port)
+    uvicorn.run("app.main:app", host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

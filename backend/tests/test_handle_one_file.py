@@ -15,7 +15,7 @@ import uuid
 
 import pytest
 
-import src.main as main_mod
+import app.main as main_mod
 from app.infrastructure.container import AppContainer
 from app.infrastructure.settings import Settings
 from app.interface.deps import set_container
@@ -113,7 +113,7 @@ async def test_new_file_with_kb_id(fake_minio):
 
 async def test_existing_unparsed_goes_retry(fake_minio):
     """已存在同 md5 且未 parsed → 重试分支（返回 fi 由调用方重提交）。"""
-    from src.models import DocumentTask, TaskStatus
+    from app.infrastructure.db.models import DocumentTask, TaskStatus
 
     task = DocumentTask(
         md5="a" * 32, original_name="x.pdf", raw_minio_path="raw-docs/x.pdf",
@@ -129,7 +129,7 @@ async def test_existing_unparsed_goes_retry(fake_minio):
 
 async def test_existing_parsed_is_instant_upload():
     """已存在且 parsed 且 MinIO 有产物 → 秒传（fi 为 None）。"""
-    from src.models import DocumentTask, TaskStatus
+    from app.infrastructure.db.models import DocumentTask, TaskStatus
 
     _install_fake_minio(parsed_exists=True)
     task = DocumentTask(

@@ -25,7 +25,7 @@ from tqdm import tqdm
 
 from app.infrastructure.settings import get_settings
 from cli._common import setup_script_logging
-from src.models import DocumentTask, TaskStatus
+from app.infrastructure.db.models import DocumentTask, TaskStatus
 
 log = logging.getLogger("scan")
 

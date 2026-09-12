@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.infrastructure.settings import get_settings
-from src.models import Base
+from app.infrastructure.db.models import Base
 
 config = context.config
 

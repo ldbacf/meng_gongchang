@@ -16,9 +16,11 @@ def _project_root() -> Path:
 
 
 def test_no_slug_magic_in_src():
-    src_root = _project_root() / "src"
+    """应用包内（app/）除 seed 文件与 KB 常量定义处外不得出现 slug 魔法串。"""
+    src_root = _project_root() / "app"
+    allowed = _SEED_FILES | _DOMAIN_ALLOWED
     for path in sorted(src_root.rglob("*.py")):
-        if path.name in _SEED_FILES:
+        if path.name in allowed:
             continue
         text = path.read_text(encoding="utf-8")
         assert "zhong_guo_quan_ke" not in text, f"{path}"

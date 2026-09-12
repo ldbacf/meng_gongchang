@@ -23,7 +23,7 @@ def fetch_l0_meta(hits: list, es_index: str | None = None) -> dict[str, dict]:
     """
     if not hits:
         return {}
-    from src.search import get_es_client
+    from app.infrastructure.search import get_es_client
 
     doc_ids = sorted({h.doc_id for h in hits if h.doc_id and not h.title_cn})
     if not doc_ids:

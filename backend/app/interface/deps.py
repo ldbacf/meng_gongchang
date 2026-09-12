@@ -13,9 +13,9 @@ from fastapi import Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth import get_current_user
-from src.db import get_db
-from src.models import KnowledgeBase, User
+from app.interface.security import get_current_user
+from app.infrastructure.db.session import get_db
+from app.infrastructure.db.models import KnowledgeBase, User
 
 from app.infrastructure.container import AppContainer
 

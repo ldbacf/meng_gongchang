@@ -3,10 +3,10 @@
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
-from src.auth import decode_token
-from src.db import async_session
-from src.models import User
-from src.ws_manager import get_ws_registry
+from app.interface.security import decode_token
+from app.infrastructure.db.session import async_session
+from app.infrastructure.db.models import User
+from app.infrastructure.ws_manager import get_ws_registry
 
 router = APIRouter()
 
@@ -25,7 +25,7 @@ async def ws_documents(
         return
 
     # 黑名单校验（登出后 token 立即失效）
-    from src.auth import is_token_blacklisted
+    from app.interface.security import is_token_blacklisted
 
     if await is_token_blacklisted(token):
         await websocket.close(code=4001, reason="Token revoked")

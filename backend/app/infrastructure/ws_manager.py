@@ -109,7 +109,7 @@ async def broadcast_doc_update(task, kb_id=None):
     kid = kb_id or getattr(task, "kb_id", None)
     if not kid:
         return
-    from src.schemas import DocumentResponse
+    from app.interface.schemas import DocumentResponse
 
     try:
         doc_data = DocumentResponse.model_validate(task).model_dump(mode="json")

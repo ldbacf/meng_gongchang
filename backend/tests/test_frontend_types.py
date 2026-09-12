@@ -2,7 +2,7 @@
 
 断言生成物存在且覆盖本阶段新增/关键端点与 schema。
 生成命令（写进阶段报告）：
-    uv run python -c "import json;from src.main import app;json.dump(app.openapi(), open('openapi.json','w',encoding='utf-8'), ensure_ascii=False)"
+    uv run python -c "import json;from app.main import app;json.dump(app.openapi(), open('openapi.json','w',encoding='utf-8'), ensure_ascii=False)"
     npx --yes openapi-typescript openapi.json -o ../frontend/src/types/api.gen.ts
 """
 from __future__ import annotations

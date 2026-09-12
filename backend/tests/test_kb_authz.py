@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from app.application.services.chat_service import ChatService
 from app.infrastructure.container import AppContainer
 from app.infrastructure.settings import Settings
-from src.auth import require_admin
+from app.interface.security import require_admin
 
 
 class _User:
@@ -50,7 +50,9 @@ async def test_chat_query_kb_not_found_404():
 
 
 def test_deprecated_search_entry_removed():
-    src_path = Path(__file__).resolve().parent.parent / "src" / "search.py"
+    src_path = (
+        Path(__file__).resolve().parent.parent / "app" / "infrastructure" / "search.py"
+    )
     text = src_path.read_text(encoding="utf-8")
     assert "search_with_intent" not in text
     assert "search_and_answer" not in text
@@ -67,8 +69,8 @@ def test_sse_generator_no_long_session():
     """
     src_path = Path(__file__).resolve().parent.parent / "app" / "application" / "services" / "chat_service.py"
     text = src_path.read_text(encoding="utf-8")
-    # 无路由注入的长活 session 依赖（不 import src.db.get_db / Depends(get_db)）
-    assert "from src.db import get_db" not in text
+    # 无路由注入的长活 session 依赖（不 import app.infrastructure.db.session.get_db / Depends(get_db)）
+    assert "from app.infrastructure.db.session import get_db" not in text
     assert "Depends(get_db" not in text
     assert "async def get_db" not in text
     persist_path = (

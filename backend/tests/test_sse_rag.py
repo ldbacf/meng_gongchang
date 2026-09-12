@@ -97,7 +97,7 @@ async def test_intent_degraded_on_fail(monkeypatch):
 
     set_container(AppContainer(settings=Settings(_env_file=None, jwt_secret_key="x", use_query_expansion=False)))
 
-    monkeypatch.setattr("src.query_intent.analyze_intent", lambda query, last_context="", kb_kind=None: IntentResult())
+    monkeypatch.setattr("app.infrastructure.adapters.query_intent.analyze_intent", lambda query, last_context="", kb_kind=None: IntentResult())
 
     out = await intent.intent({
         "query": "高血压怎么治",
@@ -114,7 +114,7 @@ async def test_fusion_degraded_on_silent_fail(monkeypatch):
     def fake_rerank(query, hits, top_n):
         return list(hits)  # 保序，score_rerank 全 0
 
-    monkeypatch.setattr("src.search.rerank", fake_rerank)
+    monkeypatch.setattr("app.infrastructure.search.rerank", fake_rerank)
 
     def _h():
         return SearchHit(chunk_id="c1", doc_id="d1", content="正文", rank_milvus=1, score_rrf=1.0)

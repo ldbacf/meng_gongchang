@@ -59,12 +59,12 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src", "app", "cli"]
+packages = ["app", "cli"]
 
 [project.scripts]
-# API 启动入口（含 Windows SelectorEventLoop 修正，见 src/run_api.py）
-medrag-api = "src.run_api:main"
-pipeline-api = "src.main:app"
+# API 启动入口（含 Windows SelectorEventLoop 修正，见 app/run_api.py）
+medrag-api = "app.run_api:main"
+pipeline-api = "app.main:app"
 # 阶段 3：独立 worker 进程（驱动 IngestionGraph）
 pipeline-worker = "app.application.worker:main"
 # 阶段 4 前置：bge-m3 独立常驻服务（模型只加载一次）

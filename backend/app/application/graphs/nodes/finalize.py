@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from app.application.graphs.nodes._task import load_task, mark_failed
 from app.application.graphs.state import IngestState
-from src.models import TaskStatus
+from app.infrastructure.db.models import TaskStatus
 
 
 async def finalize(state: IngestState) -> dict:

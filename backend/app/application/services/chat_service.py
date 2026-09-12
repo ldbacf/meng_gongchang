@@ -37,7 +37,7 @@ from app.interface.sse import (
     frame_step,
     frame_text,
 )
-from src.models import Conversation, KnowledgeBase, Message
+from app.infrastructure.db.models import Conversation, KnowledgeBase, Message
 
 _HEARTBEAT_INTERVAL = 10.0  # 秒；长流防网关掐断（A-4.7）
 _QUEUE_MAX = 500

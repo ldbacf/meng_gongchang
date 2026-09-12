@@ -98,7 +98,7 @@ def test_api_direct() -> bool:
 
 def test_pipeline() -> bool:
     """ES 召回 + Milvus 召回 + RRF 融合 + Rerank 精排"""
-    from src.search import search, rerank
+    from app.infrastructure.search import search, rerank
 
     print("\n" + "=" * 60)
     print("  测试 2: search → rerank 完整链路")
@@ -113,7 +113,7 @@ def test_pipeline() -> bool:
     except Exception as e:
         print(f"  ⚠️ 召回失败 (Milvus 可能无数据): {e}")
         print("  尝试仅 ES 召回...")
-        from src.search import _es_search
+        from app.infrastructure.search import _es_search
         try:
             hits = _es_search(QUERY, filters={"level": "L1"}, top_k=50)
         except Exception as e2:

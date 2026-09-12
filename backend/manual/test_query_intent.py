@@ -50,7 +50,7 @@ TEST_CASES = [
 
 
 def test_intent_only() -> bool:
-    from src.query_intent import analyze_intent
+    from app.infrastructure.adapters.query_intent import analyze_intent
 
     print("=" * 65)
     print("  测试 1: 意图识别")
@@ -87,8 +87,8 @@ def test_intent_only() -> bool:
 
 
 def test_pipeline() -> bool:
-    from src.query_intent import analyze_intent
-    from src.search import search, rerank
+    from app.infrastructure.adapters.query_intent import analyze_intent
+    from app.infrastructure.search import search, rerank
     from app.domain.knowledge_base import KBKind
 
     print("\n" + "=" * 65)

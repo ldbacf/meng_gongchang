@@ -2,7 +2,7 @@
 查询意图识别模块 — 适配层（LLM 调用），策略/prompt/解析在 `app/domain/rag/intent.py`。
 
 用法:
-    from src.query_intent import analyze_intent
+    from app.infrastructure.adapters.query_intent import analyze_intent
 
     intent = await asyncio.to_thread(analyze_intent, "儿童发热怎么用药")
     print(intent.coverage)         # low

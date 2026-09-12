@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from src.main import _pdf_range_bounds
+from app.main import _pdf_range_bounds
 
 
 def test_full_when_no_range():

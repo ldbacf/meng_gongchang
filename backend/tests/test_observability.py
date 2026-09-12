@@ -31,7 +31,7 @@ from app.interface.deps import set_container
 
 def test_metrics_endpoint():
     set_container(AppContainer())  # 不 start（metrics 不需 PG/模型）
-    from src.routers.metrics import router as metrics_router
+    from app.interface.routers.metrics import router as metrics_router
 
     app = FastAPI()
     app.include_router(metrics_router)
@@ -117,24 +117,24 @@ async def test_tracing_rag_spans(monkeypatch):
     set_container(container)
 
     monkeypatch.setattr(
-        "src.search._get_embed_model",
+        "app.infrastructure.search._get_embed_model",
         lambda: type("M", (), {"embed_query": lambda self, q: [0.1] * 8})(),
     )
     monkeypatch.setattr(
-        "src.search._milvus_search", lambda emb, filters=None, **kw: [_hit()]
+        "app.infrastructure.search._milvus_search", lambda emb, filters=None, **kw: [_hit()]
     )
-    monkeypatch.setattr("src.search._es_search", lambda q, filters=None, **kw: [_hit("d2")])
+    monkeypatch.setattr("app.infrastructure.search._es_search", lambda q, filters=None, **kw: [_hit("d2")])
     monkeypatch.setattr(
-        "src.search.rerank", lambda q, hits, top_n: hits,
+        "app.infrastructure.search.rerank", lambda q, hits, top_n: hits,
     )
     monkeypatch.setattr(
-        "src.query_intent.analyze_intent", lambda q, last_context="", kb_kind=None: IntentResult(domain="医学", coverage="high", rewritten_query=q),
+        "app.infrastructure.adapters.query_intent.analyze_intent", lambda q, last_context="", kb_kind=None: IntentResult(domain="医学", coverage="high", rewritten_query=q),
     )
 
     async def fake_answer_stream(user_prompt, kb_kind):
         yield "回答"
 
-    monkeypatch.setattr("src.llm_answer.answer_stream_async", fake_answer_stream)
+    monkeypatch.setattr("app.infrastructure.adapters.llm_answer.answer_stream_async", fake_answer_stream)
 
     initial = {
         "message_id": str(uuid.uuid4()),

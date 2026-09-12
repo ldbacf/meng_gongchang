@@ -7,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth import (
+from app.interface.security import (
     blacklist_token,
     create_access_token,
     create_refresh_token,
@@ -16,9 +16,9 @@ from src.auth import (
     hash_password,
     verify_password,
 )
-from src.db import get_db
-from src.models import User
-from src.schemas import (
+from app.infrastructure.db.session import get_db
+from app.infrastructure.db.models import User
+from app.interface.schemas import (
     LoginRequest,
     RegisterRequest,
     LogoutRequest,
@@ -66,7 +66,7 @@ async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
     if not user_id:
         raise HTTPException(401, "Token 数据错误")
 
-    from src.auth import is_token_blacklisted
+    from app.interface.security import is_token_blacklisted
 
     if await is_token_blacklisted(req.refresh_token):
         raise HTTPException(401, "Refresh token 已失效")

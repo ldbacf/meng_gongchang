@@ -16,7 +16,7 @@ from sqlalchemy import select
 from app.domain.knowledge_base import KBKind
 from app.infrastructure.settings import get_settings
 from app.interface.deps import get_container
-from src.models import DocumentTask, KnowledgeBase, TaskStatus, default_pipeline_steps
+from app.infrastructure.db.models import DocumentTask, KnowledgeBase, TaskStatus, default_pipeline_steps
 
 
 async def backfill() -> None:

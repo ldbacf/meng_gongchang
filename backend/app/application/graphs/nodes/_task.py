@@ -10,7 +10,7 @@ import time
 
 from sqlalchemy import select
 
-from src.models import DocumentTask, TaskStatus
+from app.infrastructure.db.models import DocumentTask, TaskStatus
 
 
 async def load_task(md5: str) -> DocumentTask | None:

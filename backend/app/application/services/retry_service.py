@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from src.models import DocumentTask, TaskStatus
+from app.infrastructure.db.models import DocumentTask, TaskStatus
 
 
 class RetryService:
@@ -36,7 +36,7 @@ class RetryService:
             async with self._container.get_db_sessionmaker()() as session:
                 from sqlalchemy import select
 
-                from src.models import DocumentTask as _DT
+                from app.infrastructure.db.models import DocumentTask as _DT
 
                 r = await session.execute(select(_DT).where(_DT.id == task.id))
                 t = r.scalar_one()
@@ -60,7 +60,7 @@ class RetryService:
         async with self._container.get_db_sessionmaker()() as session:
             from sqlalchemy import select
 
-            from src.models import DocumentTask as _DT
+            from app.infrastructure.db.models import DocumentTask as _DT
 
             r = await session.execute(select(_DT).where(_DT.id == task.id))
             t = r.scalar_one()

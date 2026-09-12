@@ -1,6 +1,6 @@
 """CitationBuilder — 引用组装（纯函数，零外部依赖）。
 
-自 `src/routers/chat.py` 内联块提取。**ES 查询（`l0_meta`）留在 src/infrastructure，
+自 `src/routers/chat.py` 内联块提取。**ES 查询（`l0_meta`）留在 app/infrastructure，
 builder 只接收结果 dict 入参**（domain 零外部依赖，T-2.8）。
 """
 from __future__ import annotations

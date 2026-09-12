@@ -17,7 +17,7 @@ from app.domain.knowledge_base import KBKind
 
 
 async def answer(state: dict) -> dict:
-    from src.llm_answer import answer_stream_async, build_answer_prompt
+    from app.infrastructure.adapters.llm_answer import answer_stream_async, build_answer_prompt
 
     query = state["query"]
     reranked = state.get("reranked") or []

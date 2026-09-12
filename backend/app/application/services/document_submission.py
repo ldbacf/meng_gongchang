@@ -13,8 +13,8 @@ from collections import defaultdict
 
 from sqlalchemy import select
 
-from src.key_manager import TokenExhausted
-from src.models import DocumentTask, TaskStatus
+from app.infrastructure.key_manager import TokenExhausted
+from app.infrastructure.db.models import DocumentTask, TaskStatus
 
 
 class SubmissionService:

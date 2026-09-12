@@ -22,7 +22,7 @@ from app.domain.rag.intent import IntentResult
 from app.domain.retrieval.search_hit import SearchHit
 from app.infrastructure.container import AppContainer
 from app.interface.deps import set_container
-from src.models import Conversation, Message, User
+from app.infrastructure.db.models import Conversation, Message, User
 
 
 def _fact(n: int, seed: str) -> tuple[list[SearchHit], list[SearchHit]]:
@@ -77,9 +77,9 @@ async def rag_env(monkeypatch):
     def fake_analyze(query, last_context="", kb_kind=None):
         return IntentResult(domain="医学", coverage="high", rewritten_query=query)
 
-    monkeypatch.setattr("src.search.recall_dual", fake_recall_dual)
-    monkeypatch.setattr("src.search.rerank", fake_rerank)
-    monkeypatch.setattr("src.query_intent.analyze_intent", fake_analyze)
+    monkeypatch.setattr("app.infrastructure.search.recall_dual", fake_recall_dual)
+    monkeypatch.setattr("app.infrastructure.search.rerank", fake_rerank)
+    monkeypatch.setattr("app.infrastructure.adapters.query_intent.analyze_intent", fake_analyze)
 
     yield container, uid, cid, recall_calls
 
@@ -122,7 +122,7 @@ async def test_happy_path(rag_env, monkeypatch):
     async def fake_answer_stream(user_prompt, kb_kind):
         yield "高"; yield "血压"; yield "建议"
 
-    monkeypatch.setattr("src.llm_answer.answer_stream_async", fake_answer_stream)
+    monkeypatch.setattr("app.infrastructure.adapters.llm_answer.answer_stream_async", fake_answer_stream)
 
     graph = container.get_rag_graph()
     initial = _initial(uid, cid)
@@ -160,7 +160,7 @@ async def test_abort_resume_replays_only_answer(rag_env, monkeypatch):
             raise RuntimeError("LLM 暂时不可用")
         yield "重放后的回答"
 
-    monkeypatch.setattr("src.llm_answer.answer_stream_async", flaky_answer_stream)
+    monkeypatch.setattr("app.infrastructure.adapters.llm_answer.answer_stream_async", flaky_answer_stream)
 
     graph = container.get_rag_graph()
     initial = _initial(uid, cid)
@@ -188,7 +188,7 @@ async def test_token_not_in_checkpoint(rag_env, monkeypatch):
         for t in ["一", "二", "三"]:
             yield t
 
-    monkeypatch.setattr("src.llm_answer.answer_stream_async", fake_answer_stream)
+    monkeypatch.setattr("app.infrastructure.adapters.llm_answer.answer_stream_async", fake_answer_stream)
 
     graph = container.get_rag_graph()
     initial = _initial(uid, cid)
@@ -211,7 +211,7 @@ async def test_error_frame_and_failed_message(rag_env, monkeypatch):
     async def broken_answer_stream(user_prompt, kb_kind):
         raise RuntimeError("生成失败")
 
-    monkeypatch.setattr("src.llm_answer.answer_stream_async", broken_answer_stream)
+    monkeypatch.setattr("app.infrastructure.adapters.llm_answer.answer_stream_async", broken_answer_stream)
 
     initial = _initial(uid, cid)
     mid = initial["message_id"]

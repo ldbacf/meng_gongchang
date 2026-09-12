@@ -18,7 +18,7 @@ from app.application.graphs.ingest_graph import build_ingest_graph
 from app.infrastructure.adapters.mineru import MineruFatalError
 from app.infrastructure.container import AppContainer
 from app.interface.deps import set_container
-from src.models import DocumentTask, KnowledgeBase, TaskStatus
+from app.infrastructure.db.models import DocumentTask, KnowledgeBase, TaskStatus
 
 _SAMPLE_MD = "# 1 引言\n\n测试文档正文。\n"
 
@@ -144,7 +144,7 @@ async def _task_state(container, md5):
 async def test_ingest_graph_happy_path(ingest_env, monkeypatch):
     """T-3.1: poll→download→dispatch→子图→finalize，终态 READY，pipeline_steps 全 done。"""
     container, kb, task = ingest_env
-    from src import indexer as indexer_mod
+    from app.infrastructure import indexer as indexer_mod
 
     monkeypatch.setattr(indexer_mod, "es_bulk_write", lambda idx, chunks: len(chunks))
     # 一次 poll 即 done
@@ -263,7 +263,7 @@ async def test_retry_from_checkpoint_resume(ingest_env, monkeypatch):
     from app.application.graphs.ingest_graph import build_ingest_graph
 
     container, kb, task = ingest_env
-    from src import indexer as indexer_mod
+    from app.infrastructure import indexer as indexer_mod
 
     monkeypatch.setattr(indexer_mod, "es_bulk_write", lambda idx, chunks: len(chunks))
 
@@ -312,7 +312,7 @@ async def test_retry_from_checkpoint_resume(ingest_env, monkeypatch):
 async def test_ingest_graph_poll_pending_then_done(ingest_env, monkeypatch):
     """T-3.2 前奏: poll pending（interrupt 暂停）→ resume 后 done → READY。"""
     container, kb, task = ingest_env
-    from src import indexer as indexer_mod
+    from app.infrastructure import indexer as indexer_mod
 
     monkeypatch.setattr(indexer_mod, "es_bulk_write", lambda idx, chunks: len(chunks))
     # 第一次 poll 空（pending），第二次 done

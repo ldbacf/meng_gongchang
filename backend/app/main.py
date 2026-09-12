@@ -14,10 +14,10 @@ from sqlalchemy import func, select
 
 from app.infrastructure.settings import get_settings
 from app.interface.deps import get_container
-from src.db import async_session
-from src.key_manager import get_key_manager
-from src.models import DocumentTask, TaskStatus
-from src.schemas import TaskCreateResponse, TaskStatusResponse
+from app.infrastructure.db.session import async_session
+from app.infrastructure.key_manager import get_key_manager
+from app.infrastructure.db.models import DocumentTask, TaskStatus
+from app.interface.schemas import TaskCreateResponse, TaskStatusResponse
 
 
 @asynccontextmanager
@@ -38,8 +38,8 @@ async def lifespan(app: FastAPI):
     from sqlalchemy import func as sql_func  # noqa: F811
 
     async with async_session() as session:
-        from src.models import KnowledgeBase, User
-        from src.auth import hash_password
+        from app.infrastructure.db.models import KnowledgeBase, User
+        from app.interface.security import hash_password
 
         result = await session.execute(
             select(sql_func.count()).select_from(User)
@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
 
     # 创建默认知识库 + 回填现有文档
     async with async_session() as session:
-        from src.models import KnowledgeBase, DocumentTask
+        from app.infrastructure.db.models import KnowledgeBase, DocumentTask
 
         kb_result = await session.execute(
             select(KnowledgeBase).where(KnowledgeBase.slug == "zhong_guo_quan_ke")
@@ -201,7 +201,7 @@ async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateRespons
     # ── 新文件：落 raw-docs + 建 task（提交解析由调用方经 SubmissionService 完成）──
     from datetime import datetime as _dt, timezone as _tz
 
-    from src.models import default_pipeline_steps
+    from app.infrastructure.db.models import default_pipeline_steps
 
     raw_path = minio.upload_raw_pdf(file_md5, filename, content)
     steps = default_pipeline_steps()
@@ -237,7 +237,7 @@ async def _copy_across_kb(
     """
     from datetime import datetime as _dt, timezone as _tz
 
-    from src.models import default_pipeline_steps
+    from app.infrastructure.db.models import default_pipeline_steps
 
     steps = default_pipeline_steps()
     now = _dt.now(_tz.utc).timestamp()
@@ -281,12 +281,12 @@ async def _copy_across_kb(
 
 # ── 注册路由 ──────────────────────────────────────────────
 
-from src.auth import get_current_user, require_admin  # noqa: E402
-from src.routers.auth import router as auth_router  # noqa: E402
-from src.routers.chat import router as chat_router  # noqa: E402
-from src.routers.admin import router as admin_router  # noqa: E402
-from src.routers.ws import router as ws_router  # noqa: E402
-from src.routers.metrics import router as metrics_router  # noqa: E402
+from app.interface.security import get_current_user, require_admin  # noqa: E402
+from app.interface.routers.auth import router as auth_router  # noqa: E402
+from app.interface.routers.chat import router as chat_router  # noqa: E402
+from app.interface.routers.admin import router as admin_router  # noqa: E402
+from app.interface.routers.ws import router as ws_router  # noqa: E402
+from app.interface.routers.metrics import router as metrics_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(chat_router)
@@ -499,9 +499,9 @@ async def _find_pdf_object_name(doc_id: str) -> str | None:
     """
     from datetime import timedelta
 
-    from src.models import DocumentTask
+    from app.infrastructure.db.models import DocumentTask
 
-    from src.db import async_session
+    from app.infrastructure.db.session import async_session
 
     bucket = get_settings().minio_raw_bucket
     es_index = get_settings().es_index
@@ -546,7 +546,7 @@ async def _find_pdf_object_name(doc_id: str) -> str | None:
 
     # ── 3. 查 ES L0 chunk 反拿 md5 → 再去 MinIO 扫 ──
     try:
-        from src.search import get_es_client
+        from app.infrastructure.search import get_es_client
 
         es = get_es_client()
         resp = es.search(

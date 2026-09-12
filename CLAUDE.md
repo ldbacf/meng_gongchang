@@ -27,13 +27,13 @@
 2. DB schema 由 Alembic 管理（**已移除 lifespan create_all**）：
    - 全新库：`uv run alembic upgrade head`
    - 已有库：`uv run alembic stamp 0002_checkpoint`（标记基线，勿重复建表）
-3. 后端 API（**必须用 `medrag-api`，不要直接 `uvicorn src.main:app`**）：
+3. 后端 API（**必须用 `medrag-api`，不要直接 `uvicorn app.main:app`**）：
    ```bash
-   cd backend && uv run medrag-api            # == uvicorn src.main:app，但先切 SelectorEventLoop
+   cd backend && uv run medrag-api            # == uvicorn app.main:app，但先切 SelectorEventLoop
    ```
    > **为什么**：checkpointer（AsyncPostgresSaver）经 psycopg async 连 PG，而 psycopg async
    > **不支持 Windows 默认的 ProactorEventLoop** → 直接 uvicorn 起会建不出 checkpointer，
-   > 问答图不可用（日志出现"警告: Postgres checkpointer 创建失败"）。入口 `src/run_api.py`
+   > 问答图不可用（日志出现"警告: Postgres checkpointer 创建失败"）。入口 `app/run_api.py`
    > 会先设 `WindowsSelectorEventLoopPolicy`。**勿加 `--workers`/`--reload`**（子进程会强制
    > 回 Proactor）；多进程请用 compose 的 `backend` 服务（Linux 镜像无此限制）。
 4. 入库 worker（独立终端，消费队列）：
@@ -55,8 +55,18 @@
 
 ## 开发规范
 
-### 架构分层（重构目标）
-`interface → application → domain ← infrastructure`，依赖严格单向：
+### 架构分层（已落地：`src/` 已并入 `app/`）
+`interface → application → domain ← infrastructure`，依赖严格单向；**唯一应用包 = `app/`**：
+
+```
+app/
+├── main.py  run_api.py        入口（FastAPI 装配 / 启动）
+├── interface/                 deps · sse · schemas · security · routers/
+├── application/               graphs/(ingest+rag) · services/ · rag/
+├── domain/                    chunking · document · rag · retrieval · ports（纯函数，零外部依赖）
+└── infrastructure/            adapters/ · db/(models+session) · es/ · milvus/ · redis/ ·
+                               checkpoint/ · observability/ · search.py · indexer.py · ws_manager.py · key_manager.py
+```
 - `domain/` 纯函数、零外部依赖（仅 stdlib）；承载状态机/契约/算法
 - `infrastructure/` 实现端口适配器；客户端经 `AppContainer` 注入（**禁止模块级全局单例**）
 - 契约冻结见 `docs/langgraph-refactor/总需求文档.md` §7（pipeline_steps / SSE v1 / doc_id 口径 / TaskStatus 状态机）
@@ -71,7 +81,7 @@
 
 ### 其它
 - 依赖用 `uv add` / `uv sync`，锁定在 `uv.lock`
-- 后端代码改动后 `uv run python -c "import src.main"` 做导入体检
+- 后端代码改动后 `uv run python -c "import app.main"` 做导入体检
 - Windows 下 curl 发中文 JSON 会因 GBK 编码解析失败：用 UTF-8 文件 + `--data-binary @file`
 
 ---

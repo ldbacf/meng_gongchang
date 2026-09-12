@@ -16,7 +16,7 @@ async def retrieval(state: dict) -> dict:
     kb = state.get("kb") or {}
     search_query = state.get("rewritten_query") or state["query"]
 
-    from src.search import recall_dual
+    from app.infrastructure.search import recall_dual
 
     t0 = time.perf_counter()
     await emit_step("retrieval", "pending")

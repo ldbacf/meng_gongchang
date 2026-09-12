@@ -10,7 +10,7 @@ from __future__ import annotations
 from app.application.checkpoint_registry import config_for, thread_id_for_doc
 from app.application.graphs.nodes._task import load_task
 from app.application.graphs.state import IngestState
-from src.models import TaskStatus
+from app.infrastructure.db.models import TaskStatus
 
 
 async def dispatch_index(state: IngestState) -> dict:

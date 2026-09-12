@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from src import run_api
+from app import run_api
 
 
 def test_win32_sets_selector_policy(monkeypatch):
@@ -48,6 +48,6 @@ def test_main_does_not_pass_workers(monkeypatch):
 
     run_api.main()
 
-    assert captured["app"] == "src.main:app"
+    assert captured["app"] == "app.main:app"
     assert captured["port"] == 8123
     assert "workers" not in captured and "reload" not in captured

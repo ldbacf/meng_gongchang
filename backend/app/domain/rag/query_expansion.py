@@ -1,6 +1,6 @@
 """查询术语扩展 — prompt 资产 + 响应解析（纯函数）。
 
-LLM 调用留在 `src/query_expansion.py` 适配层；本模块持有 prompt 与 `parse_expansion_response`。
+LLM 调用留在 `app/infrastructure/adapters/query_expansion.py` 适配层；本模块持有 prompt 与 `parse_expansion_response`。
 """
 from __future__ import annotations
 

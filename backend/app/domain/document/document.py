@@ -4,7 +4,7 @@
 - `transition_to()`：流水线内正常迁移（走 `transition()`，非法抛 InvalidStatusTransition）。
 - `reset()`：人为重开（重传/重扫/重试），**无条件**写 PENDING，非状态机迁移。
 
-ORM（`src/models.DocumentTask`）提供同语义的 `set_status/reset`，本类供阶段 3 图节点使用。
+ORM（`app/infrastructure/db/models.DocumentTask`）提供同语义的 `set_status/reset`，本类供阶段 3 图节点使用。
 """
 from __future__ import annotations
 

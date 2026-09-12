@@ -28,8 +28,8 @@ QUERY = "高血压患者降压药物怎么选"
 
 def test_format_context():
     """测试 context 拼装格式"""
-    from src.search import SearchHit
-    from src.llm_answer import format_context
+    from app.infrastructure.search import SearchHit
+    from app.infrastructure.adapters.llm_answer import format_context
 
     hits = [
         SearchHit(
@@ -59,8 +59,8 @@ def test_format_context():
 
 def test_answer_sync():
     """非流式回答"""
-    from src.search import SearchHit
-    from src.llm_answer import answer
+    from app.infrastructure.search import SearchHit
+    from app.infrastructure.adapters.llm_answer import answer
 
     hits = _make_test_hits()
 
@@ -81,8 +81,8 @@ def test_answer_sync():
 
 def test_answer_stream():
     """流式回答"""
-    from src.search import SearchHit
-    from src.llm_answer import answer_stream
+    from app.infrastructure.search import SearchHit
+    from app.infrastructure.adapters.llm_answer import answer_stream
 
     hits = _make_test_hits()
 
@@ -109,8 +109,8 @@ def test_answer_stream():
 
 def test_pipeline():
     """搜索→LLM 回答一键管线（需要 ES + Milvus 运行中）"""
-    from src.llm_answer import answer
-    from src.search import search
+    from app.infrastructure.adapters.llm_answer import answer
+    from app.infrastructure.search import search
 
     print("\n" + "=" * 60)
     print(f"  [Test] search → answer pipeline")
@@ -135,8 +135,8 @@ def test_pipeline():
 
 def test_pipeline_stream():
     """搜索→LLM 回答流式（需要 ES + Milvus 运行中）"""
-    from src.llm_answer import answer
-    from src.search import search
+    from app.infrastructure.adapters.llm_answer import answer
+    from app.infrastructure.search import search
 
     print("\n" + "=" * 60)
     print(f"  [Test] search → answer (stream)")
@@ -164,7 +164,7 @@ def test_pipeline_stream():
 
 def _make_test_hits():
     """构造测试用的 SearchHit 列表"""
-    from src.search import SearchHit
+    from app.infrastructure.search import SearchHit
 
     return [
         SearchHit(

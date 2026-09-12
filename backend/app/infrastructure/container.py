@@ -223,7 +223,7 @@ class AppContainer:
         if f is not None:
             return f
         if self._key_manager is None:
-            from src.key_manager import KeyManager
+            from app.infrastructure.key_manager import KeyManager
 
             s = self.get_settings()
             self._key_manager = KeyManager(
@@ -236,7 +236,7 @@ class AppContainer:
         if f is not None:
             return f
         if self._ws is None:
-            from src.ws_manager import WSRegistry
+            from app.infrastructure.ws_manager import WSRegistry
 
             self._ws = WSRegistry(self.get_event_bus())
         return self._ws
@@ -386,7 +386,7 @@ class AppContainer:
                 if "ProactorEventLoop" in msg:
                     print(
                         "[API] 提示: Windows 下请用 `uv run medrag-api` 启动（会切到 "
-                        "SelectorEventLoop）；直接 `uvicorn src.main:app` 无法建 checkpointer，"
+                        "SelectorEventLoop）；直接 `uvicorn app.main:app` 无法建 checkpointer，"
                         "问答图将不可用。"
                     )
 

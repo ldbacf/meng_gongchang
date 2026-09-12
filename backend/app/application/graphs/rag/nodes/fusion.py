@@ -14,7 +14,7 @@ from app.domain.retrieval.rrf import rrf_fusion
 
 
 async def _rerank(query: str, hits: list):
-    from src.search import rerank
+    from app.infrastructure.search import rerank
 
     return await asyncio.to_thread(rerank, query, hits, 5)
 

@@ -13,7 +13,7 @@ from argparse import ArgumentParser
 from sqlalchemy import func, select
 
 from app.interface.deps import get_container
-from src.models import DocumentTask, TaskStatus
+from app.infrastructure.db.models import DocumentTask, TaskStatus
 
 log = logging.getLogger("check")
 

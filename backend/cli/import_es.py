@@ -1,4 +1,4 @@
-"""批量导入 chunk JSON 到 Elasticsearch — 复用 `src.indexer.es_bulk_write`（唯一写入 seam）。
+"""批量导入 chunk JSON 到 Elasticsearch — 复用 `app.infrastructure.indexer.es_bulk_write`（唯一写入 seam）。
 
 原 `scripts/import_es.py` 内联 `helpers.bulk`；收敛后统一经 `es_bulk_write`
 （自动建索引 + `_id=chunk_id` + refresh，与在线 `es_write` 节点同源）。
@@ -55,7 +55,7 @@ def main() -> None:
         return
     logger.info("共 %d 个文件待导入 → 索引 %s", len(pending), args.es_index)
 
-    from src.indexer import es_bulk_write
+    from app.infrastructure.indexer import es_bulk_write
 
     stats = {"docs": 0, "errors": 0}
     t_start = time.time()

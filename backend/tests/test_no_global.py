@@ -1,4 +1,4 @@
-"""T-1.12 — 静态检查：src/ 无模块级可变全局客户端单例、无 os.getenv 重复解析。"""
+"""T-1.12 — 静态检查：app/ 无模块级可变全局客户端单例、无 os.getenv 重复解析。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,8 +16,10 @@ _FORBIDDEN = [
 
 
 def _src_files() -> list[Path]:
-    root = Path(__file__).resolve().parent.parent / "src"
-    return sorted(root.rglob("*.py"))
+    """扫描应用包（app/ 与 cli/）—— `src/` 已于阶段 5 目录整理并入 app/。"""
+    root = Path(__file__).resolve().parent.parent
+    files = sorted((root / "app").rglob("*.py")) + sorted((root / "cli").rglob("*.py"))
+    return [p for p in files if "__pycache__" not in p.parts]
 
 
 def test_no_module_global_client_singletons():
@@ -38,12 +40,15 @@ def test_no_os_getenv_in_src():
 
 
 def test_no_private_cross_imports():
-    """架构红线：禁止 import src.search._get_es / _connect_milvus / key_manager._tokens。"""
+    """架构红线：禁止跨模块 import 私有名（search._get_es / _connect_milvus / key_manager._tokens）。
+
+    注：只禁**跨模块**访问（如 `key_manager._tokens`）；模块内部 `self._tokens` 属正常封装。
+    """
     forbidden_imports = [
-        "from src.search import _get_es",
-        "from src.search import _connect_milvus",
+        "from app.infrastructure.search import _get_es",
+        "from app.infrastructure.search import _connect_milvus",
         "import _get_es",
-        "._tokens",
+        "key_manager._tokens",
     ]
     hits = []
     for path in _src_files():

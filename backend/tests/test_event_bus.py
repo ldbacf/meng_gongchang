@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from src.ws_manager import WSRegistry
+from app.infrastructure.ws_manager import WSRegistry
 
 
 class _FakePubSub:

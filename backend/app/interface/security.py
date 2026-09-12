@@ -10,8 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.settings import get_settings
-from src.db import get_db
-from src.models import User
+from app.infrastructure.db.session import get_db
+from app.infrastructure.db.models import User
 
 _SECRET = get_settings().jwt_secret_key
 

@@ -1,7 +1,7 @@
 """Prometheus 指标注册表（O-5.2 / 契约 4.2.1 / T-5.3）。
 
 - `MetricsRegistry` 集中声明对外暴露的指标，经 `AppContainer.get_metrics()` 单例注入。
-- `/metrics` 由 `src/routers/metrics.py` 调用 `registry.render()` 输出（prometheus_client 文本格式）。
+- `/metrics` 由 `app/interface/routers/metrics.py` 调用 `registry.render()` 输出（prometheus_client 文本格式）。
 - 指标命名与契约 4.2.1 对齐：图节点耗时 / RAG 量与降级 / 检索·重排·LLM·MinerU 耗时 /
   队列深度 / 额度剩余·拒绝 / LLM·MinerU 错误率。
 """

@@ -2,7 +2,7 @@
 
 - lazy 创建（首次访问才建连接），带 request_timeout / auth / 重连。
 - `close()` 释放连接，容器 shutdown 时调用。
-- 供 `src/search.get_es_client()` 等经容器取用，禁止模块级单例。
+- 供 `app.infrastructure.search.get_es_client()` 等经容器取用，禁止模块级单例。
 """
 from __future__ import annotations
 

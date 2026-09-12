@@ -1,6 +1,6 @@
 """查询意图策略 — Medical（期刊）/ Generic（通用文档）两实现（纯函数资产）。
 
-LLM 调用（`get_chat_model`）留在 `src/query_intent.py` 适配层；本模块只持有
+LLM 调用（`get_chat_model`）留在 `app/infrastructure/adapters/query_intent.py` 适配层；本模块只持有
 策略（prompt 选择）与响应解析（`parse_intent_response`）。零外部依赖。
 """
 from __future__ import annotations
