@@ -164,7 +164,7 @@ class MilvusAdapter:
         return hits
 
     def delete_by_doc_ids(self, collection_name: str, doc_ids: list[str]) -> None:
-        """按 doc_id 批量删除（阶段 3：删除 key 统一 doc_id）。"""
+        """按 doc_id 批量删除（删除 key 统一 doc_id）。"""
         if not doc_ids:
             return
         self.connect()

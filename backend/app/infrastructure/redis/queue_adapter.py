@@ -205,7 +205,7 @@ class QueueAdapter:
             else:
                 await self._redis.xadd(self._stream, {"payload": msg.to_json()})
 
-    # ── batch 级并发控制（阶段 3）────────────────────────────
+    # ── batch 级并发控制 ────────────────────────────
 
     async def acquire_lock(self, batch_id: str, ttl: int = 300) -> bool:
         """认领批锁（SET NX）——防双 worker / retry 与存活 worker 同批双跑。"""

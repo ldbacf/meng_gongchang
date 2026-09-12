@@ -1,6 +1,6 @@
 """T-5.13 — `_handle_one_file` 新文件分支回归。
 
-背景：阶段 3 改动时「新文件」处理块被错放进 `_copy_across_kb()` 的两个 return 之后
+背景：「新文件」处理块曾被错放进 `_copy_across_kb()` 的两个 return 之后
 （永远执行不到），而 `_handle_one_file` 缺该分支 → 上传**新** PDF 时隐式返回 None，
 调用方 `resp, fi = await _handle_one_file(...)` 抛 TypeError（500）。
 

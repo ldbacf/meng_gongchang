@@ -16,7 +16,7 @@ _BACKEND = Path(__file__).resolve().parent.parent
 _REQUIRED = {
     # 基础设施
     "postgres", "redis", "minio", "elasticsearch", "milvus",
-    # 应用（阶段 5）
+    # 应用
     "backend", "ingestion-worker", "embedding-service",
 }
 

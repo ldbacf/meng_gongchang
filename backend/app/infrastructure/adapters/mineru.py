@@ -1,6 +1,6 @@
 """MinerU API 客户端适配器 — 多 Token 提交 / 轮询 / 下载。
 
-结构化异常（替代 worker 字符串匹配，阶段 1 引入异常类型、阶段 3 正式落地分类）：
+结构化异常（替代 worker 字符串匹配）：
 - `MineruFatalError`：不可恢复（batch 不存在 / 无权限 / token 失效 / 上传失败）。
 - `MineruTransientError`：可重试（网络错误 / 429 重试耗尽 / 5xx）。
 """
@@ -21,7 +21,7 @@ UPLOAD_TIMEOUT = httpx.Timeout(300.0, connect=30.0)
 
 MAX_RETRIES = 3
 
-# 致命错误文案（与旧 worker 字符串匹配对齐，分类迁移在阶段 3 正式落地）
+# 致命错误文案（与旧 worker 字符串匹配对齐）
 _FATAL_KEYWORDS = ("找不到任务", "没有权限", "Token 错误", "Token 过期")
 
 

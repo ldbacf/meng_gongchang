@@ -1,6 +1,6 @@
-"""会话 & 聊天路由 — 会话 CRUD + SSE 流式 RAG（阶段 4：驱动 QAGraph）。
+"""会话 & 聊天路由 — 会话 CRUD + SSE 流式 RAG（驱动 QAGraph）。
 
-阶段 4 收缩：`chat_stream` 不再内联 470 行串行管线，改经 `ChatService.stream_chat`
+收缩：`chat_stream` 不再内联 470 行串行管线，改经 `ChatService.stream_chat`
 驱动 QAGraph（图 = pipeline/编排唯一真相）。SSE 帧由 `interface/sse.py` 投影（v 信封）。
 """
 import uuid

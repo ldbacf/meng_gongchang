@@ -1,7 +1,7 @@
 """AsyncPostgresSaver 工厂（langgraph-checkpoint-postgres 3.1.2）。
 
 - **导入路径**：`langgraph.checkpoint.postgres.aio`（3.1.2 的 async saver 在 aio 子模块，
-  `postgres` 顶层只有 BasePostgresSaver——阶段 3 文档验收命令需以此为准）。
+  `postgres` 顶层只有 BasePostgresSaver）。
 - DDL 已由 Alembic 0002 版本化迁移建好（checkpoints/checkpoint_blobs/...），
   `setup()` 仅幂等校验（红线 C2，不依赖 `.setup()` 建表）。
 - Windows 下 psycopg async 需 SelectorEventLoop（ProactorEventLoop 不支持）——

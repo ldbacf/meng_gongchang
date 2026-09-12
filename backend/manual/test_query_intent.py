@@ -105,7 +105,7 @@ def test_pipeline() -> bool:
 
         # Step 1: 意图识别
         intent = analyze_intent(query, "", KBKind.MEDICAL_DEFAULT)
-        # Step 2: 检索（阶段 4 收敛为 QAGraph；此处保持声明式链路）
+        # Step 2: 检索（已收敛为 QAGraph；此处保持声明式链路）
         hits = search(
             intent.rewritten_query or query,
             filters={"level": "L1"}, top_k=10,

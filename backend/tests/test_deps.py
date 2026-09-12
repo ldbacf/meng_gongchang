@@ -1,4 +1,4 @@
-"""interface 层依赖测试（阶段 1：AppContainer 单例）。"""
+"""interface 层依赖测试（AppContainer 单例）。"""
 from __future__ import annotations
 
 from app.interface.deps import get_container, set_container

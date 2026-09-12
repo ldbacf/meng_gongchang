@@ -1,4 +1,4 @@
-"""可靠队列端口抽象 — 阶段 1 QueueAdapter（Redis Streams）实现之。"""
+"""可靠队列端口抽象 — QueueAdapter（Redis Streams）实现之。"""
 from __future__ import annotations
 
 from typing import Protocol

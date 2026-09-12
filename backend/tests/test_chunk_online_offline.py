@@ -1,6 +1,6 @@
 """T-2.6 — 统一切分入口：在线（indexer）与离线（run_chunker）同一输入产出同构 chunks。
 
-阶段 2 后在线 `index_document` 图与离线 `cli/run_chunker` 共用
+在线 `index_document` 图与离线 `cli/run_chunker` 共用
 `chunk_document`（唯一入口）。对同一输入（md5 + full.md + meta={}）：
 - doc_id = 契约口径 md5[:8]；
 - generic L0 带 title 入参（引用展示不回归为"未知文档"）。

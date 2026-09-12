@@ -16,7 +16,7 @@ _FORBIDDEN = [
 
 
 def _src_files() -> list[Path]:
-    """扫描应用包（app/ 与 cli/）—— `src/` 已于阶段 5 目录整理并入 app/。"""
+    """扫描应用包（app/ 与 cli/）—— `src/` 已并入 app/。"""
     root = Path(__file__).resolve().parent.parent
     files = sorted((root / "app").rglob("*.py")) + sorted((root / "cli").rglob("*.py"))
     return [p for p in files if "__pycache__" not in p.parts]

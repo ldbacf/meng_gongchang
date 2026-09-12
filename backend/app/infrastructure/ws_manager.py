@@ -1,4 +1,4 @@
-"""WebSocket 连接管理器 — 进程内注册表 + Redis 事件总线（阶段 1）。
+"""WebSocket 连接管理器 — 进程内注册表 + Redis 事件总线。
 
 - `WSRegistry.broadcast()`：保留原签名，内部改为**发布到事件总线**（topic=kb_id），
   跨进程可收（A-1.6）；本地订阅任务收件后 fanout 到本进程连接。

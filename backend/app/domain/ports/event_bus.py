@@ -1,4 +1,4 @@
-"""事件总线端口抽象 — 阶段 1 EventBusRedis 实现之。"""
+"""事件总线端口抽象 — EventBusRedis 实现之。"""
 from __future__ import annotations
 
 from typing import Protocol

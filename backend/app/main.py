@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
     print("[API] KeyManager 启动:")
     print(await get_key_manager().usage_report())
 
-    # 阶段 3：worker 已剥离为独立进程（app.application.worker / pipeline-worker），
+    # worker 已剥离为独立进程（app.application.worker / pipeline-worker），
     # API 进程不再内嵌消费队列——入库管线由独立 worker 驱动 IngestionGraph。
     yield
 

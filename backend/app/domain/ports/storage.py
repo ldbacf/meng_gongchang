@@ -1,4 +1,4 @@
-"""对象存储端口抽象 — 阶段 1 MinioAdapter 实现之。"""
+"""对象存储端口抽象 — MinioAdapter 实现之。"""
 from __future__ import annotations
 
 from typing import Protocol

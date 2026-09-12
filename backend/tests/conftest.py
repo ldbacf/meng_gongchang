@@ -1,7 +1,7 @@
 """pytest 共享 fixture。
 
-阶段 0 以契约/纯函数单测为主（不依赖真实外部服务）；
-阶段 1 起在此扩展 fakeredis / testcontainers fixture（ES/Milvus/Redis/PG）。
+以契约/纯函数单测为主（不依赖真实外部服务）；
+集成类测试在此扩展 fakeredis / testcontainers fixture（ES/Milvus/Redis/PG）。
 """
 from __future__ import annotations
 

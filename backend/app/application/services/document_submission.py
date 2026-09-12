@@ -4,7 +4,7 @@
 → commit（成功扣额）→ enqueue（mode=submit）；失败 → refund（退回）+ task FAILED。
 
 - 额度三阶段（contract 7.10）：reserve → commit / refund。
-- 队列 payload 只含 token_id（阶段 1 契约）。
+- 队列 payload 只含 token_id。
 - task 状态/步骤更新经领域状态机（set_status），本服务是提交路径的唯一编排方。
 """
 from __future__ import annotations

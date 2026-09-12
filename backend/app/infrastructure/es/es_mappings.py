@@ -6,7 +6,7 @@
   strict 模式下缺字段会被拒绝，在线自动建必须合并；`metadata.title_cn/keywords_cn`
   声明为 text+ik_smart —— `search.py` 对 `metadata.title_cn/keywords_cn` 做 match 语义加分。
 - 存量已创建的通用 KB 索引停在旧宽松 mapping（字段类型不可变更），
-  "双轨合一"仅对新建索引成立，存量待阶段 3 统一重建。
+  "双轨合一"仅对新建索引成立，存量待统一重建。
 """
 from __future__ import annotations
 

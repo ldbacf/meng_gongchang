@@ -3,7 +3,7 @@
 - worker / admin / API 进程 publish；ws 层 subscribe 后 fanout 到前端（A-1.6 跨进程可收）。
 - **pubsub 用专用连接**（从共享池创建会长期独占池连接，耗尽池）。
 - 事件类型见 contract 4.2.3：doc_update / doc_deleted / step。
-- 断线重连/快照 resync 留阶段 4（SSE 升级）处理；本阶段保证 at-most-once 语义。
+- 断线重连/快照 resync 留后续（SSE 升级）处理；当前保证 at-most-once 语义。
 """
 from __future__ import annotations
 

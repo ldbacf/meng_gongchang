@@ -1,8 +1,7 @@
 """langgraph-checkpoint-postgres 所需的 checkpoint 表。
 
 DDL 与 langgraph-checkpoint-postgres 3.1.2 的 AsyncPostgresSaver 期望一致。
-由 Alembic 版本化管理，**不依赖** saver 的 `.setup()` 运行时建表。
-阶段 0 预置（休眠表），阶段 3 图落地后启用。
+由 Alembic 版本化管理，**不依赖** saver 的 `.setup()` 运行时建表。 预置（休眠表）， 图落地后启用。
 Revision ID: 0002_checkpoint
 Revises: 0001_baseline
 Create Date: 2026-08-07

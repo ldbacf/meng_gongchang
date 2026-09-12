@@ -1,5 +1,5 @@
 """
-检索管线模块 — 双路召回 + RRF 融合 + Rerank 接口（阶段 1：经 AppContainer 取客户端）。
+检索管线模块 — 双路召回 + RRF 融合 + Rerank 接口（经 AppContainer 取客户端）。
 
 用法:
     from app.infrastructure.search import search, rerank
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from app.infrastructure.settings import get_settings
 
-# 阶段 2：SearchHit 契约统一来自 domain（re-export 兼容 test/ 手动脚本 `from app.infrastructure.search import SearchHit`）
+# SearchHit 契约统一来自 domain（re-export 兼容 test/ 手动脚本 `from app.infrastructure.search import SearchHit`）
 from app.domain.retrieval.search_hit import SearchHit  # noqa: F401
 
 
@@ -160,7 +160,7 @@ def _milvus_search(
 
 
 # ═══════════════════════════════════════════════════════════════
-# RRF 融合（阶段 2：迁 domain，保留同 chunk_id 合并 + ES 字段回填语义）
+# RRF 融合（迁 domain，保留同 chunk_id 合并 + ES 字段回填语义）
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -179,7 +179,7 @@ def recall_dual(
 ) -> tuple[list[SearchHit], list[SearchHit]]:
     """双路初召（embed + ES BM25 + Milvus COSINE），返回 `(milvus_hits, es_hits)`，**不做 RRF**。
 
-    阶段 4：供 QAGraph 的 retrieval 节点调用，后续由 fusion 节点 `rrf_fusion` 独立融合
+    供 QAGraph 的 retrieval 节点调用，后续由 fusion 节点 `rrf_fusion` 独立融合
     （保留"embed 独立 + rrf 独立"语义与按步 metric）。短 query（<15 字）重复嵌入增强向量信号。
     """
     from app.infrastructure.observability.instrument import tracked_span

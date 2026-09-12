@@ -65,7 +65,7 @@ def test_main_has_no_dead_imports():
         assert sym not in text, f"app/main.py 仍有死 import: {sym}"
 
 
-# ── 目录归位（阶段 5 收尾：src/ 并入 app/）──────────────────
+# ── 目录归位（src/ 并入 app/）──────────────────
 
 
 def test_src_dir_fully_removed():

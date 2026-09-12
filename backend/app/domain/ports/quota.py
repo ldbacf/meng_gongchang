@@ -1,4 +1,4 @@
-"""额度记账端口抽象 — 阶段 1 QuotaStoreRedis 实现之。"""
+"""额度记账端口抽象 — QuotaStoreRedis 实现之。"""
 from __future__ import annotations
 
 from typing import Protocol

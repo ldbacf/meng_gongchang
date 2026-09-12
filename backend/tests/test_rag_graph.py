@@ -56,7 +56,7 @@ async def rag_env(monkeypatch):
         session.add(user)
         await session.commit()
         await session.refresh(user)
-        conv = Conversation(user_id=user.id, title="阶段4测试")
+        conv = Conversation(user_id=user.id, title="测试会话")
         session.add(conv)
         await session.commit()
         await session.refresh(conv)

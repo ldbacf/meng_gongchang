@@ -1,7 +1,7 @@
 """chunk 结构契约定稿 — L0/L1/L2 三粒度。
 
 `chunk_id` 命名、`doc_id` 统一口径、层级/类型枚举在此冻结（总需求文档 §7.4）。
-在线与离线两条路径最终共用同一 `chunk_document` 入口（阶段 2 归位），产物结构同构。
+在线与离线两条路径最终共用同一 `chunk_document` 入口，产物结构同构。
 纯 stdlib，零外部依赖。
 """
 from __future__ import annotations

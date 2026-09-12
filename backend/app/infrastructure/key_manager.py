@@ -1,4 +1,4 @@
-"""多 Key 额度管理与自动轮换 — Redis 持久化门面（阶段 1）。
+"""多 Key 额度管理与自动轮换 — Redis 持久化门面。
 
 用法（三阶段语义，contract 4.2.2）:
     mgr = get_key_manager()

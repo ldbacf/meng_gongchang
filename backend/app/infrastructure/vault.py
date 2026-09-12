@@ -1,6 +1,6 @@
 """TokenVault — MinerU token 与 token_id 的确定性映射。
 
-阶段 1 起，队列 payload / Redis 额度 key 一律使用 token_id（`tk_1..tk_n`），
+队列 payload / Redis 额度 key 一律使用 token_id（`tk_1..tk_n`），
 **明文 MinerU token 只经 `resolve()` 进 MinerU API 请求**，杜绝明文散落。
 
 映射必须按 `Settings.mineru_token_list` 的**索引确定性构建**（而非运行时随机分配），

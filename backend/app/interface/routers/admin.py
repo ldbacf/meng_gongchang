@@ -52,7 +52,7 @@ async def _submit_one_file(fi: dict, db: AsyncSession):
 async def _cleanup_es_milvus(md5: str, pipeline_steps: dict | None, task_batch_id: str | None = None) -> None:
     """删除 ES 和 Milvus 中属于该文档的全部 chunk。
 
-    阶段 2：doc_id 硬切点（契约口径 md5[:8]），删除按**双口径**兼容：
+    doc_id 硬切点（契约口径 md5[:8]），删除按**双口径**兼容：
     - `task_batch_id`：预置文献的 ES doc_id（article_id）；
     - `md5[:8]`：统一后的契约 doc_id；
     - `md5`：存量旧口径（在线通用 KB 曾用全 32 位 md5 作 doc_id）。
@@ -232,7 +232,7 @@ async def create_knowledge_base(
         name=req.name,
         description=req.description,
         slug=req.slug,
-        # 阶段 2：新建 KB 一律 GENERIC（代码显式，不依赖列 server_default，防静默变 medical_default）
+        # 新建 KB 一律 GENERIC（代码显式，不依赖列 server_default，防静默变 medical_default）
         kb_kind=KBKind.GENERIC.value,
         es_index=es_index,
         milvus_collection=milvus_collection,
@@ -395,7 +395,7 @@ async def delete_document(
 
     kb_id = task.kb_id
 
-    # 阶段 3：DeleteDocumentService 按统一 doc_id 清理 ES/Milvus + 残留对账（O-3.6）
+    # DeleteDocumentService 按统一 doc_id 清理 ES/Milvus + 残留对账（O-3.6）
     from app.application.services.document_deletion import DocumentBusyError
     from app.interface.deps import get_container
 
@@ -453,7 +453,7 @@ async def retry_document(
     task.pipeline_steps = dict(steps)
     await db.commit()
 
-    # 阶段 3：RetryService 从 checkpoint 恢复（O-3.4）——
+    # RetryService 从 checkpoint 恢复（O-3.4）——
     # 索引失败 → reset + resume 队列消息（worker 续跑，禁重放已消费 batch）；
     # MinerU 失败 → 重新提交（新 batch_id）+ 旧批 superseded。
     from app.interface.deps import get_container

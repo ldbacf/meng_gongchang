@@ -1,4 +1,4 @@
-"""Embedding 端口抽象 — 阶段 1 EmbeddingFactory 实现之。"""
+"""Embedding 端口抽象 — EmbeddingFactory 实现之。"""
 from __future__ import annotations
 
 from typing import Protocol

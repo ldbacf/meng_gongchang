@@ -92,7 +92,7 @@ def build_answer_prompt(
     history: list[dict] | None = None,
     top_n: int = 5,
 ) -> str:
-    """构建 LLM user_prompt（context + history_block + query）（阶段 4 提取，供图节点/旧 answer 复用）。
+    """构建 LLM user_prompt（context + history_block + query）。
 
     context 由 `format_context` 拼装；history 取最近 20 条（10 turns）。
     """
@@ -209,9 +209,7 @@ async def answer_stream_async(
     user_prompt: str,
     kb_kind: KBKind = KBKind.MEDICAL_DEFAULT,
 ):
-    """流式回答（async）→ 逐 token yield；**LLM 异常上抛**（不产 `[错误:...]`）。
-
-    阶段 4 供 QAGraph answer 节点用（C8：async 图 + async LLM 流式，不阻塞 event loop）。
+    """流式回答（async）→ 逐 token yield；**LLM 异常上抛**（不产 `[错误:...]`）。 供 QAGraph answer 节点用（C8：async 图 + async LLM 流式，不阻塞 event loop）。
     失败交给 error_handler 产 `t:error`，而非把错误拼进正文（A-4.4 修复）。
     """
     sys_prompt = GENERIC_SYSTEM_PROMPT if kb_kind is KBKind.GENERIC else SYSTEM_PROMPT

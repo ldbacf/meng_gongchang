@@ -1,4 +1,4 @@
-"""知识库策略 — KBKind 显式化（阶段 2，消灭 slug 魔法串）。
+"""知识库策略 — KBKind 显式化。
 
 `slug == "zhong_guo_quan_ke"` 过去承担「默认期刊库 + is_generic」双重隐性语义，
 现由 `kb_kind` 字段显式承载：

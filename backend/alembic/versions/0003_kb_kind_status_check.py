@@ -1,4 +1,4 @@
-"""阶段 2：TaskStatus 显式状态机 CHECK + knowledge_bases.kb_kind 策略列。
+"""TaskStatus 显式状态机 CHECK + knowledge_bases.kb_kind 策略列。
 
 - `document_tasks.status`：先 UPDATE 归一化存量脏值（→ 'failed'），再建 CHECK 约束
   （用 CheckConstraint 而非原生 PG ENUM，避免 CREATE TYPE / USING 转换风险）。

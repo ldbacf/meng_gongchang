@@ -2,7 +2,7 @@
 
 `chunk_document(md5, full_md_text, content_list_v2, meta, title)`：
 - 在线（index_document 图）与离线（cli/run_chunker）共用此入口，产物同构。
-- doc_id 统一口径：`meta.article_id` 兜底 `md5[:8]`（冻结契约，阶段 2 硬切点）。
+- doc_id 统一口径：`meta.article_id` 兜底 `md5[:8]`（冻结契约）。
 - **L0 分流**：meta 有 article_id → 完整 L0（期刊元数据）；meta 空 → generic L0
   （`title` 入参保标题，通用 KB 引用展示不回归为"未知文档"）。
 """

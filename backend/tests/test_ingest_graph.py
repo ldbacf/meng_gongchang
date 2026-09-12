@@ -90,7 +90,7 @@ async def ingest_env():
     })
     set_container(container)
     kb = KnowledgeBase(
-        name="阶段3测试库", description="", slug=f"t3_{uuid.uuid4().hex[:8]}",
+        name="测试库", description="", slug=f"t3_{uuid.uuid4().hex[:8]}",
         kb_kind="generic",
         es_index=f"kb_t3_{uuid.uuid4().hex[:8]}",
         milvus_collection=f"kb_t3_{uuid.uuid4().hex[:8]}",

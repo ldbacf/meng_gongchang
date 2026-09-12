@@ -1,4 +1,4 @@
-"""通用知识库索引管线 — Chunk → Embed → ES + Milvus 写入（阶段 1：经 AppContainer）。
+"""通用知识库索引管线 — Chunk → Embed → ES + Milvus 写入（经 AppContainer）。
 
 - ES/Milvus schema 与规范脚本同源（`app/infrastructure/es/es_mappings.py`、
   `app/infrastructure/milvus/schema.py`），杜绝双轨。

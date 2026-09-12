@@ -1,4 +1,4 @@
-"""embedding-server — bge-m3 独立常驻服务（阶段 4 前置独立项）。
+"""embedding-server — bge-m3 独立常驻服务。
 
 动机：原每个 API/worker 进程各自加载一份 4.3G bge-m3（≈5 份 ≈11.5G，且每次重启重载）。
 本服务把模型剥离为**单进程常驻**，API/worker 经 HTTP 调 `/embed`、`/embed/batch`。

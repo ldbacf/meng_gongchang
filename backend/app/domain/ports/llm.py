@@ -1,4 +1,4 @@
-"""LLM Chat 端口抽象 — 阶段 1 LlmChatFactory 实现之。"""
+"""LLM Chat 端口抽象 — LlmChatFactory 实现之。"""
 from __future__ import annotations
 
 from typing import Protocol

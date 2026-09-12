@@ -1,4 +1,4 @@
-"""阶段 3：DocumentTask.md5 全局唯一 → (md5, kb_id) 复合唯一。
+"""DocumentTask.md5 全局唯一 → (md5, kb_id) 复合唯一。
 
 - 现状：`ix_document_tasks_md5` 是 UNIQUE index（SQLAlchemy unique=True + index=True 产物）。
 - 语义（O-3.7 秒传/查重冻结）：KB 内按 md5 查重；**跨 KB 复制新 task**（保留 parsed 引用）；

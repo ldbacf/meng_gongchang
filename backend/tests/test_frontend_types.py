@@ -1,7 +1,7 @@
 """T-5.10 — 前端 types 由 OpenAPI 生成（替代手工镜像）。
 
-断言生成物存在且覆盖本阶段新增/关键端点与 schema。
-生成命令（写进阶段报告）：
+断言生成物存在且覆盖关键端点与 schema。
+生成命令：
     uv run python -c "import json;from app.main import app;json.dump(app.openapi(), open('openapi.json','w',encoding='utf-8'), ensure_ascii=False)"
     npx --yes openapi-typescript openapi.json -o ../frontend/src/types/api.gen.ts
 """

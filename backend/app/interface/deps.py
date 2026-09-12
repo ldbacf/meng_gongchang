@@ -2,8 +2,8 @@
 
 - `get_container()`：进程级 AppContainer 单例（lazy 创建，无客户端实例化副作用）。
 - `set_container()`：测试替换容器（注入 fake 客户端）。
-- `require_kb_access()`：KB 作用域授权依赖。admin 透传；非 admin 需用户-KB 关联
-  （关联模型在阶段 2 建模、阶段 4 在 chat/document service 落实强校验）。
+- `require_kb_access()`：KB 作用域授权依赖——校验 KB 存在（不存在→404）；
+  查询对所有登录用户开放（未引入 KB 归属模型）；写操作（上传/建库）由 `require_admin` 把关。
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ async def require_kb_access(
     - `kb_id` 为 None → 未指定 KB（由调用方走默认 KB 逻辑），放行。
     - KB 不存在 → 404。
     - admin → 透传。
-    - 非 admin → 阶段 4 前暂放行（无用户-KB 关联模型）；阶段 4 在此强校验归属。
+    - 非 admin → 放行（查询对所有登录用户开放；KB 归属模型未引入）。
     """
     if kb_id is None:
         return user
@@ -60,5 +60,5 @@ async def require_kb_access(
     if user.role == "admin":
         return user
 
-    # TODO(阶段4): 校验用户-KB 关联（用户-KB 成员关系建模后落实强校验）。
+    # 注：未引入用户-KB 归属模型，故查询侧不做归属校验；写操作由 require_admin 把关。
     return user

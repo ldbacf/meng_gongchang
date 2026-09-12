@@ -1,4 +1,4 @@
-"""异步 SQLAlchemy 引擎 & session — 转发到 AppContainer（阶段 1）。
+"""异步 SQLAlchemy 引擎 & session — 转发到 AppContainer。
 
 `engine` / `async_session` 变为**惰性代理**：模块名/导出名不变（30+ 调用点零改动），
 首次访问才经容器创建真 engine/sessionmaker。容器 `close()` 统一 dispose。

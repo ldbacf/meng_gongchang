@@ -13,7 +13,7 @@ class Base(DeclarativeBase):
     pass
 
 
-# 阶段 2：TaskStatus / 状态机迁移表 / pipeline_steps 契约统一来自 domain（阶段 0 冻结）。
+# TaskStatus / 状态机迁移表 / pipeline_steps 契约统一来自 domain。
 # str Enum（继承 str），`TaskStatus.PENDING.value == "pending"`，兼容既有 `== "pending"` 比较。
 from app.domain.document.pipeline_steps import (  # noqa: E402
     PIPELINE_STEPS_ORDER,
@@ -110,7 +110,7 @@ class KnowledgeBase(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     slug: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    # 阶段 2：KBKind 策略（medical_default / generic），分支判断不再用 slug
+    # KBKind 策略（medical_default / generic），分支判断不再用 slug
     kb_kind: Mapped[str] = mapped_column(
         String(32), default="medical_default", nullable=False, server_default="medical_default"
     )
@@ -134,7 +134,7 @@ class DocumentTask(Base):
         UUID(as_uuid=True), ForeignKey("knowledge_bases.id", ondelete="SET NULL"), nullable=True, index=True
     )
     knowledge_base: Mapped[KnowledgeBase | None] = relationship(back_populates="documents")
-    # 阶段 3：md5 全局唯一 → (md5, kb_id) 复合唯一（KB 内查重；跨 KB 复制新 task）。
+    # md5 全局唯一 → (md5, kb_id) 复合唯一（KB 内查重；跨 KB 复制新 task）。
     # unique index 由 Alembic 0004 管理（uq_document_tasks_md5_kb_id）。
     md5: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     original_name: Mapped[str] = mapped_column(String(512), nullable=False)
@@ -146,7 +146,7 @@ class DocumentTask(Base):
     )
     batch_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
-    # ── 状态机门面（阶段 2：双端校验，DB CHECK + 领域异常） ──
+    # ── 状态机门面（双端校验，DB CHECK + 领域异常） ──
 
     def set_status(self, target: TaskStatus | str) -> str:
         """流水线正常迁移（走迁移表，非法抛 InvalidStatusTransition）。"""

@@ -1,7 +1,7 @@
 """文档任务状态机契约。
 
 `TaskStatus` 六态（值与前端 `types/knowledge.ts` 逐字一致）与显式状态迁移表。
-DB 层落 SQL Enum/CHECK（阶段 2 迁移），领域层在此校验非法跳转。
+DB 层落 SQL Enum/CHECK，领域层在此校验非法跳转。
 纯 stdlib，零外部依赖，可独立单测。
 """
 from __future__ import annotations

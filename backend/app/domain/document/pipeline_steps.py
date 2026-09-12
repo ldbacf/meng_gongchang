@@ -1,7 +1,7 @@
 """pipeline_steps 数据契约 — TypedDict + 校验器。
 
 固定六步：upload / mineru / chunking / embedding / es_write / milvus。
-图（阶段 3/4）是唯一写入方；本模块校验器拒绝未知 key、非法 status、缺 ts，
+图是唯一写入方；本模块校验器拒绝未知 key、非法 status、缺 ts，
 杜绝 worker 写 `task.status.lower()` 之类污染 JSONB 的旧行为。
 纯 stdlib，零外部依赖。
 """
