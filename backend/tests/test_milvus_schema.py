@@ -18,17 +18,9 @@ def test_milvus_field_list_matches_contract():
 
 
 def test_milvus_schema_single_source_with_init_script():
-    """init_milvus 脚本与在线自动建共用 build_milvus_schema/build_milvus_index_params。"""
-    from pathlib import Path
+    """cli.init_milvus 与在线自动建共用 build_milvus_schema/build_milvus_index_params。"""
+    from cli import init_milvus as mod
 
-    import importlib.util
-
-    backend = Path(__file__).resolve().parent.parent
-    spec = importlib.util.spec_from_file_location(
-        "init_milvus_check", backend / "scripts" / "init_milvus.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # noqa: 仅读取导入，不执行 main
     assert mod.build_milvus_schema is mv_schema.build_milvus_schema
     assert mod.build_milvus_index_params is mv_schema.build_milvus_index_params
 

@@ -1,0 +1,16 @@
+# 模型权重 4.3G（compose 卷挂载，不进镜像）
+models/
+# 本地状态/数据/日志
+data/
+log/
+chunks/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+# 本地 env（密钥经 compose environment 注入）
+.env
+# 本地文档/备忘
+docs/

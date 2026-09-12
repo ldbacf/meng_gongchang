@@ -4,8 +4,6 @@
   `app/infrastructure/milvus/schema.py`），杜绝双轨。
 - Milvus 按 chunk_id **先删后插**（幂等，图重跑/重索引安全）。
 """
-from pathlib import Path
-
 from app.infrastructure.es.es_mappings import ES_SETTINGS, build_generic_kb_mapping
 
 
@@ -57,53 +55,3 @@ def milvus_insert(collection_name: str, chunks: list[dict]) -> int:
     return mv.upsert_batch(col, chunks)
 
 
-def process_document(
-    md5: str,
-    filename: str,
-    es_index: str,
-    milvus_collection: str,
-    on_step=None,
-    meta: dict | None = None,
-) -> int:
-    """
-    完整索引管线: markdown → chunk_document(统一入口) → embed → ES + Milvus.
-
-    on_step(step_name: str, status: str, **kwargs) — 每步回调，用于更新 DB
-    meta: doc-meta JSON（通用 KB 通常为空 → generic L0；doc_id 契约口径 md5[:8]）
-    返回写入的 chunk 数。
-    """
-    from app.domain.chunking.chunk_document import chunk_document
-
-    markdown = read_parsed_markdown(md5)
-    title = Path(filename).stem
-
-    def _step(step: str, status: str, **kwargs):
-        if on_step:
-            on_step(step, status, **kwargs)
-
-    _step("chunking", "running")
-
-    result = chunk_document(md5, markdown, None, meta, title=title)
-    all_chunks = result["chunks"]
-    _step("chunking", "done", chunk_count=len(all_chunks))
-
-    # Embed
-    _step("embedding", "running")
-    from app.interface.deps import get_container
-
-    model = get_container().get_embedder().get_hf_embeddings()
-    for c in all_chunks:
-        c["vector"] = model.embed_query(c["content"])
-    _step("embedding", "done")
-
-    # Write ES
-    _step("es_write", "running", target_index=es_index)
-    n_es = es_bulk_write(es_index, all_chunks)
-    _step("es_write", "done", target_index=es_index, count=n_es)
-
-    # Write Milvus
-    _step("milvus", "running", target_collection=milvus_collection)
-    n_mv = milvus_insert(milvus_collection, all_chunks)
-    _step("milvus", "done", target_collection=milvus_collection, count=n_mv)
-
-    return len(all_chunks)

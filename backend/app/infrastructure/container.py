@@ -41,6 +41,7 @@ class AppContainer:
         self._retry_service = None
         self._rag_graph = None
         self._chat_service = None
+        self._metrics = None
         self._started = False
         self._closed = False
 
@@ -330,6 +331,19 @@ class AppContainer:
             self._chat_service = ChatService(self)
         return self._chat_service
 
+    # ── 阶段 5：观测 ──────────────────────────────────────────
+
+    def get_metrics(self):
+        """Prometheus 指标注册表（/metrics 暴露）。"""
+        f = self._fake("metrics")
+        if f is not None:
+            return f
+        if self._metrics is None:
+            from app.infrastructure.observability.metrics import MetricsRegistry
+
+            self._metrics = MetricsRegistry()
+        return self._metrics
+
     # ── 生命周期 ───────────────────────────────────────────
 
     async def start(self) -> None:
@@ -436,5 +450,6 @@ class AppContainer:
         self._retry_service = None
         self._rag_graph = None
         self._chat_service = None
+        self._metrics = None
         self._started = False
         self._closed = True

@@ -181,12 +181,19 @@ def recall_dual(
     阶段 4：供 QAGraph 的 retrieval 节点调用，后续由 fusion 节点 `rrf_fusion` 独立融合
     （保留"embed 独立 + rrf 独立"语义与按步 metric）。短 query（<15 字）重复嵌入增强向量信号。
     """
-    model = _get_embed_model()
-    embed_query = f"{query} {query}" if len(query) < 15 else query
-    q_emb = model.embed_query(embed_query)
+    from app.infrastructure.observability.instrument import tracked_span
 
-    m_hits = _milvus_search(q_emb, filters=filters, top_k=milvus_top_k, milvus_collection=milvus_collection)
-    e_hits = _es_search(query, filters=filters, top_k=es_top_k, es_index=es_index)
+    from app.interface.deps import get_container
+
+    with tracked_span(
+        "retrieval.dual", latency_metric=get_container().get_metrics().retrieval_latency, backend="dual",
+    ):
+        model = _get_embed_model()
+        embed_query = f"{query} {query}" if len(query) < 15 else query
+        q_emb = model.embed_query(embed_query)
+
+        m_hits = _milvus_search(q_emb, filters=filters, top_k=milvus_top_k, milvus_collection=milvus_collection)
+        e_hits = _es_search(query, filters=filters, top_k=es_top_k, es_index=es_index)
     return m_hits, e_hits
 
 
@@ -250,8 +257,11 @@ def rerank(
         for i, d in enumerate(with_content)
     ]
 
+    from app.infrastructure.observability.instrument import tracked_span
+
     try:
-        ranked = reranker.compress_documents(lc_docs, query)
+        with tracked_span("rerank", latency_metric=get_container().get_metrics().rerank_latency):
+            ranked = reranker.compress_documents(lc_docs, query)
     except Exception:
         return docs
 

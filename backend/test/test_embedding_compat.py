@@ -19,7 +19,7 @@ LOCAL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mode
 
 if not os.path.isdir(LOCAL_PATH):
     print(f"本地模型不存在: {LOCAL_PATH}")
-    print("请先运行 scripts/download_model.py")
+    print("请先运行 python -m cli.download_model")
     sys.exit(1)
 
 SAMPLE_TEXTS = [

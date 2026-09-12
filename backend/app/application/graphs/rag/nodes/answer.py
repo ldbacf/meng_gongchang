@@ -33,11 +33,21 @@ async def answer(state: dict) -> dict:
     if not has_content:
         full = ["未找到相关文献信息，无法回答。"]
     else:
+        from app.infrastructure.observability.instrument import tracked_span
+
+        from app.interface.deps import get_container
+
         user_prompt = build_answer_prompt(query, reranked, history, top_n=5)
         # 单次流式；失败上抛（服务层 error_handler 产 t:error + 落库 failed）
-        async for tok in answer_stream_async(user_prompt, kb_kind):
-            full.append(tok)
-            await emit_text(tok)
+        m = get_container().get_metrics()
+        with tracked_span(
+            "answer.llm",
+            latency_metric=m.llm_latency,
+            error_metric=m.llm_error_total,
+        ):
+            async for tok in answer_stream_async(user_prompt, kb_kind):
+                full.append(tok)
+                await emit_text(tok)
 
     answer_text = "".join(full)
     elapsed_ms = round((time.perf_counter() - t0) * 1000)

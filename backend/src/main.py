@@ -1,14 +1,16 @@
 """FastAPI 网关 — 多 Key 额度管理 + 自动轮换"""
 
 import hashlib
+import re
 import traceback
 import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
 
 import fitz  # PyMuPDF
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, select
 
 from app.interface.deps import get_container
@@ -24,6 +26,13 @@ from src.schemas import TaskCreateResponse, TaskStatusResponse
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 观测基建（O-5.2）：结构化 JSON 日志 + trace provider
+    from app.infrastructure.observability.logger import setup_logging
+    from app.infrastructure.observability.tracing import init_tracing
+
+    setup_logging()
+    init_tracing()
+
     # schema 演进由 Alembic 管理（backend/alembic/）：新建库 `alembic upgrade head`，
     # 已有库先 `alembic stamp 0002_checkpoint` 标记基线。此处仅做 DI 装配与启动。
     container = get_container()
@@ -278,11 +287,13 @@ from src.routers.auth import router as auth_router  # noqa: E402
 from src.routers.chat import router as chat_router  # noqa: E402
 from src.routers.admin import router as admin_router  # noqa: E402
 from src.routers.ws import router as ws_router  # noqa: E402
+from src.routers.metrics import router as metrics_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(admin_router)
 app.include_router(ws_router)
+app.include_router(metrics_router)
 
 
 # ── API 端点 ──────────────────────────────────────────────────
@@ -394,38 +405,17 @@ async def get_document_by_md5(
         return task
 
 
-@app.get("/api/v1/documents/{doc_id}/pdf")
-async def get_document_pdf(
-    doc_id: str,
-    user=Depends(get_current_user),
-):
-    """返回 PDF 预签名 URL — 支持 DocumentTask 查找 + MinIO 直接查找"""
-    from datetime import timedelta
-
-    from src.config import MINIO_RAW_BUCKET, MINIO_CHUNKS_BUCKET
-    from src.minio_client import get_minio
-
-    # 方案 A: 通过 DocumentTask 查找
-    presigned = await _try_document_task_pdf(doc_id)
-    if presigned:
-        return {"pdf_url": presigned, "total_pages": 0}
-
-    # 方案 B: 直接去 MinIO 的 raw-docs 桶按 doc_id 扫描
-    presigned = _try_minio_direct(doc_id)
-    if presigned:
-        return {"pdf_url": presigned, "total_pages": 0}
-
-    raise HTTPException(404, f"文档不存在: {doc_id}")
-
-
 @app.get("/api/v1/documents/{doc_id}/pdf/stream")
 async def stream_document_pdf(
     doc_id: str,
+    request: Request,
     user=Depends(get_current_user),
 ):
-    """代理 PDF 内容流 — 后端从 MinIO 读取 PDF 直接流式返回，不再暴露 presigned URL 给前端"""
-    from fastapi.responses import StreamingResponse
+    """代理 PDF 内容流（支持 Range 断点，T-5.6）。
 
+    从 MinIO 读取 PDF 直接流式返回（不再暴露 presigned URL）。`Range: bytes=x-y`
+    → `206 Partial Content` + `Content-Range`；越界 → 416；无 Range → 200 全量。
+    """
     from src.config import MINIO_RAW_BUCKET
     from src.minio_client import get_minio
 
@@ -435,19 +425,71 @@ async def stream_document_pdf(
         raise HTTPException(404, f"文档不存在: {doc_id}")
 
     try:
-        response = client.get_object(MINIO_RAW_BUCKET, object_path)
+        stat = client.stat_object(MINIO_RAW_BUCKET, object_path)
     except Exception as e:
         raise HTTPException(502, f"读取 PDF 失败: {e}")
+    total = stat.size
+
+    offset, length = 0, total
+    status_code = 200
+    headers = {
+        "Content-Disposition": f'inline; filename="{doc_id}.pdf"',
+        "Cache-Control": "public, max-age=3600",
+        "Accept-Ranges": "bytes",
+    }
+
+    range_header = request.headers.get("range", "")
+    offset, length, range_status, range_headers = _pdf_range_bounds(range_header, total)
+    if range_status == 416:
+        return Response(status_code=416, headers=range_headers)
+    status_code = range_status
+    headers.update(range_headers)
+
+    try:
+        response = client.get_object(MINIO_RAW_BUCKET, object_path, offset=offset, length=length)
+    except Exception as e:
+        raise HTTPException(502, f"读取 PDF 失败: {e}")
+
+    if status_code == 206:
+        headers["Content-Length"] = str(length)
 
     return StreamingResponse(
         response.stream(amt=65536),
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'inline; filename="{doc_id}.pdf"',
-            "Cache-Control": "public, max-age=3600",
-            "Accept-Ranges": "bytes",
-        },
+        status_code=status_code,
+        headers=headers,
     )
+
+
+def _pdf_range_bounds(range_header: str, total: int) -> tuple[int, int, int, dict]:
+    """解析 `Range: bytes=x-y` → `(offset, length, status_code, range_headers)`（T-5.6）。
+
+    - 无/非法 Range → 200 全量。
+    - `bytes=x-y` → 206 + `Content-Range: bytes x-y/total`（含 open-ended 上下界，len > total 截断）。
+    - `start >= total` → 416。
+    """
+    m = re.match(r"bytes=(\d*)-(\d*)", range_header)
+    if not m or total <= 0:
+        return 0, total, 200, {}
+    start_s, end_s = m.group(1), m.group(2)
+    if not start_s and not end_s:
+        return 0, total, 200, {}
+    if not start_s:
+        # suffix：bytes=-N → 最后 N 字节
+        n = min(int(end_s), total)
+        start = total - n
+        end = total - 1
+        return start, n, 206, {
+            "Content-Range": f"bytes {start}-{end}/{total}",
+        }
+    start = int(start_s)
+    end = int(end_s) if end_s else total - 1
+    if start >= total:
+        return 0, 0, 416, {"Content-Range": f"bytes */{total}"}
+    end = min(end, total - 1)
+    return start, end - start + 1, 206, {
+        "Content-Range": f"bytes {start}-{end}/{total}",
+    }
 
 
 async def _find_pdf_object_name(doc_id: str) -> str | None:
@@ -539,154 +581,6 @@ async def _find_pdf_object_name(doc_id: str) -> str | None:
         pass
 
     return None
-
-
-async def _try_document_task_pdf(doc_id: str) -> str | None:
-    """通过 DocumentTask 表查找 PDF"""
-    from datetime import timedelta
-
-    from src.config import MINIO_RAW_BUCKET
-    from src.minio_client import get_minio
-    from src.models import DocumentTask
-
-    from src.db import async_session
-
-    async with async_session() as session:
-        task = None
-        try:
-            uid = uuid.UUID(doc_id)
-        except ValueError:
-            uid = None
-        else:
-            result = await session.execute(
-                select(DocumentTask).where(DocumentTask.id == uid)
-            )
-            task = result.scalar_one_or_none()
-
-        if not task:
-            result = await session.execute(
-                select(DocumentTask).where(DocumentTask.md5 == doc_id)
-            )
-            task = result.scalar_one_or_none()
-
-        if not task:
-            result = await session.execute(
-                select(DocumentTask).where(DocumentTask.md5.startswith(doc_id)).limit(
-                    1
-                )
-            )
-            task = result.scalar_one_or_none()
-
-        if not task:
-            return None
-
-        client = get_minio()
-        if task.raw_minio_path.startswith(f"{MINIO_RAW_BUCKET}/"):
-            object_path = task.raw_minio_path[len(f"{MINIO_RAW_BUCKET}/"):]
-        else:
-            object_path = task.raw_minio_path
-
-        return client.presigned_get_object(
-            MINIO_RAW_BUCKET,
-            object_path,
-            expires=timedelta(hours=1),
-        )
-
-
-def _try_minio_direct(doc_id: str) -> str | None:
-    """直接从 MinIO 查找 PDF — 先试 doc_id 前缀，再试 ES L0 反查 md5"""
-    from datetime import timedelta
-
-    from src.config import ES_INDEX, MINIO_RAW_BUCKET
-    from src.minio_client import get_minio
-
-    client = get_minio()
-
-    # 步骤 A: 直接按 doc_id 前缀扫描
-    objects = client.list_objects(
-        MINIO_RAW_BUCKET, prefix=f"{doc_id}/", recursive=True
-    )
-    for obj in objects:
-        if not obj.object_name.endswith(".pdf"):
-            continue
-        return client.presigned_get_object(
-            MINIO_RAW_BUCKET, obj.object_name, expires=timedelta(hours=1)
-        )
-
-    objects = client.list_objects(
-        MINIO_RAW_BUCKET, prefix=f"{doc_id}", recursive=True
-    )
-    for obj in objects:
-        if not obj.object_name.endswith(".pdf"):
-            continue
-        return client.presigned_get_object(
-            MINIO_RAW_BUCKET, obj.object_name, expires=timedelta(hours=1)
-        )
-
-    # 步骤 B: 查 ES L0 chunk 反拿 md5 → 再去 MinIO 按 md5 扫
-    try:
-        from src.search import get_es_client
-
-        es = get_es_client()
-
-        resp = es.search(
-            index=ES_INDEX,
-            body={
-                "size": 1,
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"term": {"doc_id": doc_id}},
-                            {"term": {"level": "L0"}},
-                        ]
-                    }
-                },
-                "_source": ["md5"],
-            },
-        )
-        hits = resp.get("hits", {}).get("hits", [])
-        if hits:
-            md5 = hits[0]["_source"].get("md5")
-            if md5:
-                objects = client.list_objects(
-                    MINIO_RAW_BUCKET, prefix=f"{md5}/", recursive=True
-                )
-                for obj in objects:
-                    if not obj.object_name.endswith(".pdf"):
-                        continue
-                    return client.presigned_get_object(
-                        MINIO_RAW_BUCKET,
-                        obj.object_name,
-                        expires=timedelta(hours=1),
-                    )
-    except Exception:
-        pass
-
-    return None
-
-
-def _build_pdf_response(task):
-    """构建 PDF 预签名 URL"""
-    from datetime import timedelta
-
-    from src.config import MINIO_RAW_BUCKET
-    from src.minio_client import get_minio
-
-    client = get_minio()
-    if task.raw_minio_path.startswith(f"{MINIO_RAW_BUCKET}/"):
-        object_path = task.raw_minio_path[len(f"{MINIO_RAW_BUCKET}/"):]
-    else:
-        object_path = task.raw_minio_path
-
-    presigned = client.presigned_get_object(
-        MINIO_RAW_BUCKET,
-        object_path,
-        expires=timedelta(hours=1),
-    )
-    return {
-        "pdf_url": presigned,
-        "total_pages": 0,
-    }
 
 
 @app.get("/health")

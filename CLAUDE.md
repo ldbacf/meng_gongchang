@@ -7,15 +7,15 @@
 
 ## ⚠️ 红线（最重要）：禁止初始化数据
 
-**绝对不要运行 `backend/scripts/init_es.py` 或 `init_milvus.py`**——它们会 **DROP 并重建** `chunks` 索引/集合，**清空已入库数据**（ES 索引与 Milvus 向量都是派生产物，重建后数据即丢）。
+**绝对不要运行 `backend/cli/init_es.py` 或 `cli/init_milvus.py`**——它们会 **DROP 并重建** `chunks` 索引/集合，**清空已入库数据**（ES 索引与 Milvus 向量都是派生产物，重建后数据即丢）。
 
-这两个脚本**只允许在全新环境（无任何数据）**使用。判断方法：先查 `curl localhost:9200/chunks/_count` 与 Milvus `num_entities`，**非 0 就绝不能 init**。
+这两条命令**只允许在全新环境（无任何数据）**使用。判断方法：先查 `curl localhost:9200/chunks/_count` 与 Milvus `num_entities`，**非 0 就绝不能 init**。
 
 ### 数据恢复速查（若误删/缺失）
 | 数据 | 恢复方式 |
 | --- | --- |
-| ES chunks | 从 MinIO `chunks` 桶下载 1248 个 JSON → `import_es.py --dir ./chunks`（快，无嵌入） |
-| Milvus chunks | `init_milvus.py`（建空集合）→ `import_milvus.py --dir ./chunks --mode single`（CPU 重嵌入，**约 15h/1248 篇**，勿用 batch） |
+| ES chunks | 从 MinIO `chunks` 桶下载 1248 个 JSON → `python -m cli.import_es --dir ./chunks`（快，无嵌入） |
+| Milvus chunks | `python -m cli.init_milvus`（建空集合）→ `python -m cli.import_milvus --dir ./chunks --mode single`（CPU 重嵌入，**约 15h/1248 篇**，勿用 batch） |
 
 数据主源在 MinIO：`parsed-data`(解析产物) / `chunks`(切分JSON) / `raw-docs`(原始PDF) / `doc-meta`(元数据)，**永远不要动这些**。
 

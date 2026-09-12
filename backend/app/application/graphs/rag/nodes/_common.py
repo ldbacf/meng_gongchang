@@ -16,8 +16,11 @@ def last_context_from_history(history: list[dict], turns: int = 2) -> str:
     return "\n".join(lines)
 
 
-def fetch_l0_meta(hits: list) -> dict[str, dict]:
-    """批量查 ES L0 chunk 回填 title_cn / journal / md5（MEDICAL_DEFAULT 引用需要）。"""
+def fetch_l0_meta(hits: list, es_index: str | None = None) -> dict[str, dict]:
+    """批量查 ES L0 chunk 回填 title_cn / journal / md5（MEDICAL_DEFAULT 引用需要）。
+
+    `es_index` 取自 KB 目标的 es_index（QaState.kb.es_index），后端到点检索，非硬编码缺省。
+    """
     if not hits:
         return {}
     from src.search import get_es_client
@@ -29,7 +32,7 @@ def fetch_l0_meta(hits: list) -> dict[str, dict]:
     try:
         es = get_es_client()
         resp = es.search(
-            index="chunks",
+            index=es_index or "chunks",
             body={
                 "size": len(doc_ids),
                 "query": {

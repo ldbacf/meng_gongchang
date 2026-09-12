@@ -176,17 +176,27 @@ class MineruClient:
 
     async def poll_batch(self, batch_id: str, token: str) -> list[dict]:
         """使用指定 token 轮询批量任务结果"""
-        data = await self._get(f"/api/v4/extract-results/batch/{batch_id}", token=token)
+        from app.infrastructure.observability.instrument import tracked_span
+        from app.interface.deps import get_container
+
+        m = get_container().get_metrics()
+        with tracked_span("mineru.poll", latency_metric=m.mineru_latency, error_metric=m.mineru_error_total):
+            data = await self._get(f"/api/v4/extract-results/batch/{batch_id}", token=token)
         return data.get("extract_result", [])
 
     async def download_result(self, download_url: str) -> bytes:
-        try:
-            async with self._upload_client() as http:
-                resp = await http.get(download_url)
-                resp.raise_for_status()
-                return resp.content
-        except httpx.HTTPError as e:
-            raise MineruTransientError(f"下载解析结果失败: {e}") from e
+        from app.infrastructure.observability.instrument import tracked_span
+        from app.interface.deps import get_container
+
+        m = get_container().get_metrics()
+        with tracked_span("mineru.download", latency_metric=m.mineru_latency, error_metric=m.mineru_error_total):
+            try:
+                async with self._upload_client() as http:
+                    resp = await http.get(download_url)
+                    resp.raise_for_status()
+                    return resp.content
+            except httpx.HTTPError as e:
+                raise MineruTransientError(f"下载解析结果失败: {e}") from e
 
 
 def _auth_header(token: str) -> dict:

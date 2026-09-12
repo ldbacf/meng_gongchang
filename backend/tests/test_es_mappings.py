@@ -12,15 +12,9 @@ from app.infrastructure.es.es_mappings import (
 
 
 def test_es_mapping_single_source_with_init_es():
-    """init_es 脚本 import 的 ES_MAPPINGS 与本模块是同一对象（非拷贝）。"""
-    import importlib.util
+    """cli.init_es 与在线自动建共用同一 ES_MAPPINGS/ES_SETTINGS 常量（同一对象）。"""
+    from cli import init_es as mod
 
-    backend = Path(__file__).resolve().parent.parent
-    spec = importlib.util.spec_from_file_location(
-        "init_es_check", backend / "scripts" / "init_es.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # noqa: 仅读取常量，不执行 main
     assert mod.ES_MAPPINGS is ES_MAPPINGS
     assert mod.ES_SETTINGS is ES_SETTINGS
 

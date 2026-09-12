@@ -16,3 +16,5 @@ models/
 ./deploy
 ./docs
 ./ok
+# 阶段 5：OpenAPI 导出（生成物，供 openapi-typescript）
+openapi.json

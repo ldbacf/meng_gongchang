@@ -1,49 +1,49 @@
-"""从 ES + MinIO 回填 document_tasks 表（预置文献用）
-
-用法: uv run python scripts/backfill_document_tasks.py
+"""从 ES + MinIO 回填 document_tasks 表（预置文献用）。
 
 流程:
-1. 从 ES 的 chunks 索引取所有 L0 chunk（含 doc_id、md5、title_cn）
-2. 用 real md5 去 MinIO raw-docs 桶找对应 PDF 文件
+1. 从 ES chunks 索引取所有 L0 chunk（含 doc_id、md5、title_cn）
+2. 用 real md5 去 MinIO raw-docs 桶找对应 PDF
 3. 创建 DocumentTask 行，raw_minio_path 指向 MinIO 中的真实路径
+
+用法: python -m cli.backfill_document_tasks
 """
-import asyncio, sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from __future__ import annotations
 
-from elasticsearch import Elasticsearch
-from sqlalchemy import select, func
+import asyncio
+
+from sqlalchemy import select
+
 from app.domain.knowledge_base import KBKind
-from src.db import async_session
-from src.config import ES_HOST, ES_PORT, MINIO_RAW_BUCKET
+from app.interface.deps import get_container
+from src.config import MINIO_RAW_BUCKET
 from src.models import DocumentTask, KnowledgeBase, TaskStatus, default_pipeline_steps
-from src.minio_client import get_minio
-
-es = Elasticsearch(f"http://{ES_HOST}:{ES_PORT}", request_timeout=30)
-mc = get_minio()
 
 
-async def backfill():
-    async with async_session() as db:
-        kb = (await db.execute(select(KnowledgeBase).where(KnowledgeBase.kb_kind == KBKind.MEDICAL_DEFAULT.value))).scalar_one_or_none()
+async def backfill() -> None:
+    container = get_container()
+    es = container.get_es().client
+    mc = container.get_minio()
+    sessionmaker = container.get_db_sessionmaker()
+
+    async with sessionmaker() as db:
+        kb = (
+            await db.execute(
+                select(KnowledgeBase).where(
+                    KnowledgeBase.kb_kind == KBKind.MEDICAL_DEFAULT.value
+                )
+            )
+        ).scalar_one_or_none()
         if not kb:
             print("默认知识库不存在，请先启动后端")
             return
 
-        # 已有 md5（避免重复创建）
-        existing = set()
-        for row in await db.execute(select(DocumentTask.md5)):
-            existing.add(row[0])
+        existing = {row[0] for row in await db.execute(select(DocumentTask.md5))}
 
-        # ES 总 L0 数
         total = es.count(index="chunks", body={"query": {"term": {"level": "L0"}}})["count"]
         print(f"ES 中 L0 chunk: {total}  已有 DocumentTask: {len(existing)}")
 
-        created = 0
-        skipped = 0
-        no_pdf = 0
-        page_size = 200
-        offset = 0
+        created = skipped = no_pdf = 0
+        page_size, offset = 200, 0
 
         while offset < total:
             resp = es.search(index="chunks", body={
@@ -57,25 +57,16 @@ async def backfill():
                 src = hit["_source"]
                 doc_id = src.get("doc_id", "")
                 real_md5 = src.get("md5", "")
-                title = src.get("title_cn", "") or f"文献-{doc_id}"
-
-                if not doc_id or not real_md5:
-                    continue
-
-                # 用 real_md5 查重（不是 doc_id）
-                if real_md5 in existing:
+                if not doc_id or not real_md5 or real_md5 in existing:
                     skipped += 1
                     continue
                 existing.add(real_md5)
 
-                # 去 MinIO 找真实 PDF 路径
                 pdf_path = None
-                objects = list(mc.list_objects(MINIO_RAW_BUCKET, prefix=f"{real_md5}/", recursive=True))
-                for obj in objects:
+                for obj in mc.list_objects(MINIO_RAW_BUCKET, prefix=f"{real_md5}/", recursive=True):
                     if obj.object_name.endswith(".pdf"):
                         pdf_path = obj.object_name
                         break
-
                 if not pdf_path:
                     no_pdf += 1
                     print(f"  [!!] doc_id={doc_id} md5={real_md5}: MinIO 未找到 PDF")
@@ -84,16 +75,15 @@ async def backfill():
                 for s in steps:
                     steps[s]["status"] = "done"
 
-                task = DocumentTask(
+                db.add(DocumentTask(
                     kb_id=kb.id,
                     md5=real_md5,
                     batch_id=doc_id,  # 存 ES doc_id（如"7597"），删除时用
-                    original_name=title,
+                    original_name=src.get("title_cn", "") or f"文献-{doc_id}",
                     raw_minio_path=f"{MINIO_RAW_BUCKET}/{pdf_path}" if pdf_path else f"preloaded/{doc_id}",
                     status=TaskStatus.READY,
                     pipeline_steps=steps,
-                )
-                db.add(task)
+                ))
                 created += 1
 
             offset += page_size
@@ -103,5 +93,9 @@ async def backfill():
         print(f"\n完成: 新增 {created} 条, 跳过 {skipped} 条(已存在), {no_pdf} 条无原生PDF(仅可检索, 无法预览)")
 
 
-if __name__ == "__main__":
+def main() -> None:
     asyncio.run(backfill())
+
+
+if __name__ == "__main__":
+    main()

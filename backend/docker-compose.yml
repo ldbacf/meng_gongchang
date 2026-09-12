@@ -1,4 +1,27 @@
-version: "3.8"
+# 应用服务共享环境（阶段 5：env/secrets 收敛到 Compose，不落 .env 明文）。
+# 生产用 `docker compose --env-file prod.env` 覆盖弱口令（POSTGRES_PASSWORD 等）。
+x-app-env: &app-env
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: ${POSTGRES_USER:-mineru}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mineru123}
+  POSTGRES_DB: ${POSTGRES_DB:-mineru_pipeline}
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin123}
+  ES_HOST: elasticsearch
+  ES_PORT: "9200"
+  MILVUS_HOST: milvus
+  MILVUS_PORT: "19530"
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY 必须显式设置}
+  MINERU_TOKENS: ${MINERU_TOKENS:-}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+  SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
+  # bge-m3 经独立常驻服务（阶段 4 前置）；容器内走服务名
+  EMBEDDING_MODE: remote
+  EMBEDDING_SERVICE_URL: http://embedding-service:8084
 
 services:
   postgres:
@@ -141,15 +164,52 @@ services:
     depends_on:
       - milvus
 
-  # 阶段 3：入库 worker（独立进程驱动 IngestionGraph；O-3.2）。
-  # 默认不启动（`docker compose --profile worker up`）；backend 镜像（Dockerfile）与
-  # 健康检查/scale 在阶段 5 完善。本地开发用 `uv run pipeline-worker` 独立终端运行。
-  worker:
-    profiles: ["worker"]
+  # 阶段 5：backend API（uvicorn，2 worker 进程）；
+  # bge-m3 走独立 embedding-service（EMBEDDING_MODE=remote），故本进程不加载模型。
+  backend:
+    profiles: ["app"]
     build:
       context: .
+    container_name: mineru-backend
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    restart: unless-stopped
+    environment: *app-env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+
+  # 阶段 3/5：入库 worker（独立进程驱动 IngestionGraph；O-3.2）。
+  # 横向扩展 = 同一服务 `--scale ingestion-worker=2`，凭队列认领锁保证单消费者。
+  # 本地开发用 `uv run pipeline-worker` 独立终端运行。
+  ingestion-worker:
+    profiles: ["app"]
+    build:
+      context: .
+    container_name: mineru-ingestion-worker
     command: ["uv", "run", "pipeline-worker"]
     restart: unless-stopped
+    environment: *app-env
+    volumes:
+      - ./models:/app/models
+    # 队列消费活性探针：worker 无 HTTP 端口，以「主进程存活 + 能连上 Redis」近似
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis,os,sys; sys.exit(0 if redis.Redis(host=os.environ.get('REDIS_HOST','redis'),port=6379,socket_connect_timeout=3).ping() else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
     depends_on:
       postgres:
         condition: service_healthy
@@ -163,15 +223,21 @@ services:
         condition: service_healthy
 
   # 阶段 4 前置：bge-m3 独立常驻服务（模型只加载一次，供 API/worker 经 HTTP 调用）。
-  # 与 worker 同 profile（`docker compose --profile worker up`）；宿主已挂载 4.3G 模型，
-  # 不需在镜像内复制。镜像构建/健康检查阶段 5 完善。本地开发用 `uv run embedding-server`。
+  # 宿主已挂载 4.3G 模型，不需在镜像内复制。本地开发用 `uv run embedding-server`。
   embedding-service:
-    profiles: ["worker"]
+    profiles: ["app"]
     build:
       context: .
-    command: ["uv", "run", "uvicorn", "app.application.embedding_server:app", "--host", "0.0.0.0", "--port", "8084"]
+    container_name: mineru-embedding-service
+    command: ["uvicorn", "app.application.embedding_server:app", "--host", "0.0.0.0", "--port", "8084"]
     restart: unless-stopped
     volumes:
       - ./models:/app/models
     ports:
       - "8084:8084"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8084/health', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3

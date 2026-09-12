@@ -28,6 +28,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy import select
 
 from app.application.checkpoint_registry import config_for, thread_id_for_rag
+from app.infrastructure.observability.tracing import get_tracer
 from app.interface.sse import (
     frame_done,
     frame_error,
@@ -155,8 +156,28 @@ class ChatService:
         q: asyncio.Queue = asyncio.Queue(maxsize=_QUEUE_MAX)
 
         async def _runner() -> None:
+            metrics = self._c.get_metrics()
+            tracer = get_tracer("medrag")
+            node_start: dict[str, float] = {}
+            metrics.rag_total.inc()
             try:
                 async for ev in graph.astream_events(initial, config=cfg, version="v2"):
+                    tag = ev.get("event")
+                    name = ev.get("name")
+                    # 图节点 span + 耗时（O-5.2 / T-5.5）
+                    if tag == "on_chain_start":
+                        node_start[name] = time.perf_counter()
+                    elif tag == "on_chain_end" and name in node_start:
+                        dur = time.perf_counter() - node_start.pop(name)
+                        metrics.graph_node_duration.labels(graph="rag", node=name).observe(dur)
+                        span = tracer.start_span(name)
+                        span.set_attribute("graph", "rag")
+                        span.set_attribute("elapsed_ms", dur * 1000)
+                        span.end()
+                    elif tag == "on_custom_event" and name == "step":
+                        data = ev.get("data", {})
+                        if (data.get("metrics") or {}).get("degraded"):
+                            metrics.rag_degraded_total.labels(step=data.get("k", "")).inc()
                     frame = self._event_to_frame(ev)
                     if frame is not None:
                         self._put(q, frame)

@@ -1,7 +1,7 @@
 """T-3.12 — doc_id 存量迁移：口径统一 + chunk_id 重算。"""
 from __future__ import annotations
 
-from scripts.migrate_doc_id import _new_chunk_id, normalize_doc_id
+from cli.migrate_doc_id import _new_chunk_id, normalize_doc_id
 
 
 def test_normalize_doc_id():

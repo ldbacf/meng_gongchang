@@ -31,6 +31,9 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "pydantic-settings>=2.0.0",
     "alembic>=1.13",
+    "prometheus-client>=0.26.0",
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
 ]
 
 [project.optional-dependencies]
@@ -56,7 +59,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src", "app"]
+packages = ["src", "app", "cli"]
 
 [project.scripts]
 pipeline-api = "src.main:app"
@@ -64,6 +67,18 @@ pipeline-api = "src.main:app"
 pipeline-worker = "app.application.worker:main"
 # 阶段 4 前置：bge-m3 独立常驻服务（模型只加载一次）
 embedding-server = "app.application.embedding_server:run"
+# 阶段 5：运维 CLI（复用 application service/图，替代 scripts/）
+medrag-init-es = "cli.init_es:main"
+medrag-init-milvus = "cli.init_milvus:main"
+medrag-import-es = "cli.import_es:main"
+medrag-import-milvus = "cli.import_milvus:main"
+medrag-chunk = "cli.run_chunker:main"
+medrag-scan-submit = "cli.scan_submit:main"
+medrag-check-status = "cli.check_status:main"
+medrag-list-bucket = "cli.list_bucket:main"
+medrag-backfill-doc-tasks = "cli.backfill_document_tasks:main"
+medrag-migrate-doc-id = "cli.migrate_doc_id:main"
+medrag-download-model = "cli.download_model:main"
 
 [[tool.uv.index]]
 name = "pytorch-cu124"

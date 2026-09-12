@@ -17,7 +17,7 @@ async def cite(state: dict) -> dict:
     kb = state.get("kb") or {}
     kb_kind = KBKind(kb.get("kb_kind", "medical_default"))
 
-    l0_meta = {} if kb_kind is KBKind.GENERIC else fetch_l0_meta(reranked)
+    l0_meta = {} if kb_kind is KBKind.GENERIC else fetch_l0_meta(reranked, es_index=kb.get("es_index"))
     citations = build_citations(reranked, l0_meta=l0_meta, kb_kind=kb_kind)
 
     # SSE 帧契约（4.2.2）：idx/doc_id/title/snippet/md5

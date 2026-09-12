@@ -33,8 +33,8 @@ def test_no_slug_magic_in_domain():
         assert "zhong_guo_quan_ke" not in text, f"{path}"
 
 
-def test_no_slug_magic_in_scripts():
-    scripts_root = _project_root() / "scripts"
-    for path in sorted(scripts_root.rglob("*.py")):
+def test_no_slug_magic_in_cli():
+    cli_root = _project_root() / "cli"
+    for path in sorted(cli_root.rglob("*.py")):
         text = path.read_text(encoding="utf-8")
         assert "zhong_guo_quan_ke" not in text, f"{path}"
