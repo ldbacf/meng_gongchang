@@ -14,6 +14,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
+from app.infrastructure.settings import get_settings
 from cli._common import (
     load_checkpoint,
     mark_done,
@@ -21,7 +22,6 @@ from cli._common import (
     scan_json_files,
     setup_script_logging,
 )
-from src.config import ES_INDEX
 
 
 def _chunks_from_file(filepath: Path) -> list[dict]:
@@ -35,7 +35,7 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="限制文件数")
     parser.add_argument("--batch", type=int, default=500, help="每批量大小")
     parser.add_argument("--no-resume", action="store_true", help="禁用断点续跑")
-    parser.add_argument("--es-index", type=str, default=ES_INDEX, help="目标 ES 索引")
+    parser.add_argument("--es-index", type=str, default=get_settings().es_index, help="目标 ES 索引")
     args = parser.parse_args()
 
     logger = setup_script_logging("import_es")

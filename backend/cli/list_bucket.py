@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from argparse import ArgumentParser
 
-from src.config import MINIO_META_BUCKET, MINIO_PARSED_BUCKET, MINIO_RAW_BUCKET
-from src.minio_client import get_minio
+from app.infrastructure.settings import get_settings
+from app.interface.deps import get_container
 
 
 def list_folders(bucket: str) -> None:
-    client = get_minio()
+    client = get_container().get_minio().client
     folders = {o.object_name.split("/")[0] for o in client.list_objects(bucket, recursive=True)}
     flist = sorted(folders)
     print(f"  {bucket}: {len(flist)} 个文件夹")
@@ -29,7 +29,8 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.all:
-        for b in (MINIO_RAW_BUCKET, MINIO_META_BUCKET, MINIO_PARSED_BUCKET):
+        s = get_settings()
+        for b in (s.minio_raw_bucket, s.minio_meta_bucket, s.minio_parsed_bucket):
             list_folders(b)
     else:
         list_folders(args.bucket)

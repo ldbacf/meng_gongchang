@@ -14,7 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.domain.rag.prompts import EXPANSION_SYSTEM_PROMPT
 from app.domain.rag.query_expansion import parse_expansion_response
-from src.config import DEEPSEEK_API_KEY, DEEPSEEK_INTENT_MODEL
+from app.infrastructure.settings import get_settings
 
 logger = logging.getLogger("query_expansion")
 
@@ -26,12 +26,15 @@ def expand_query(query: str, timeout: float = 8.0) -> str:
     返回:
         str: 扩展后的专业检索词（空格分隔），失败时返回原 query
     """
-    if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY.startswith("your-"):
+    from app.interface.deps import get_container
+
+    s = get_settings()
+    if not s.deepseek_api_key or s.deepseek_api_key.startswith("your-"):
         return query
 
-    from src.llm import get_chat_model
-
-    chat = get_chat_model(model=DEEPSEEK_INTENT_MODEL, temperature=0.0)
+    chat = get_container().get_llm().get_chat_model(
+        model=s.deepseek_intent_model, temperature=0.0,
+    )
 
     try:
         resp = chat.bind(response_format={"type": "json_object"}).invoke(

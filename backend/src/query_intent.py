@@ -19,7 +19,7 @@ from app.domain.rag.intent import (  # noqa: F401  re-export
     get_intent_strategy,
     parse_intent_response,
 )
-from src.config import DEEPSEEK_API_KEY, DEEPSEEK_INTENT_MODEL
+from app.infrastructure.settings import get_settings
 
 logger = logging.getLogger("query_intent")
 
@@ -42,12 +42,15 @@ def analyze_intent(
     返回:
         IntentResult，失败时返回原 query 直通的默认结果
     """
-    if not DEEPSEEK_API_KEY or DEEPSEEK_API_KEY.startswith("your-"):
+    from app.interface.deps import get_container
+
+    s = get_settings()
+    if not s.deepseek_api_key or s.deepseek_api_key.startswith("your-"):
         return IntentResult(rewritten_query=query)
 
-    from src.llm import get_chat_model
-
-    chat = get_chat_model(model=DEEPSEEK_INTENT_MODEL, temperature=0.0)
+    chat = get_container().get_llm().get_chat_model(
+        model=s.deepseek_intent_model, temperature=0.0,
+    )
 
     strategy = get_intent_strategy(kb_kind)
 
@@ -55,7 +58,6 @@ def analyze_intent(
     if last_context:
         user_message = f"上轮对话：\n{last_context}\n\n当前提问：{query}\n\n请根据上轮对话，将当前提问中可能存在的指代词（如\"它\"\"这个\"\"上面\"）替换为具体内容，重写为独立的检索查询。"
 
-    from app.interface.deps import get_container
     from app.infrastructure.observability.instrument import tracked_span
 
     try:

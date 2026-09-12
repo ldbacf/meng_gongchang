@@ -23,9 +23,8 @@ import fitz
 from sqlalchemy import select
 from tqdm import tqdm
 
+from app.infrastructure.settings import get_settings
 from cli._common import setup_script_logging
-from src.config import MINIO_META_BUCKET, MINIO_RAW_BUCKET
-from src.minio_client import check_parsed_exists, upload_meta_json, upload_raw_pdf
 from src.models import DocumentTask, TaskStatus
 
 log = logging.getLogger("scan")
@@ -58,7 +57,10 @@ async def _dedup_filter(pairs: list[dict]) -> list[dict]:
     """MD5 查重 + 上传 raw/meta 到 MinIO + 建/重置 DocumentTask（提交前的前置）。"""
     from app.interface.deps import get_container
 
-    sessionmaker = get_container().get_db_sessionmaker()
+    container = get_container()
+    sessionmaker = container.get_db_sessionmaker()
+    minio = container.get_minio()
+    s_cfg = get_settings()
     result, skip_done, skip_running = [], 0, 0
 
     for pair in tqdm(pairs, desc="MD5 查重", ncols=80):
@@ -67,7 +69,7 @@ async def _dedup_filter(pairs: list[dict]) -> list[dict]:
         async with sessionmaker() as s:
             row = (await s.execute(select(DocumentTask).where(DocumentTask.md5 == md5))).scalar_one_or_none()
             if row:
-                if row.status == TaskStatus.PARSED and check_parsed_exists(md5):
+                if row.status == TaskStatus.PARSED and minio.check_parsed_exists(md5):
                     skip_done += 1
                     continue
                 if row.status == TaskStatus.PROCESSING:
@@ -79,20 +81,20 @@ async def _dedup_filter(pairs: list[dict]) -> list[dict]:
 
         pages = fitz.open(stream=data, filetype="pdf").page_count
         json_data = pair["json_path"].read_bytes()
-        rp = upload_raw_pdf(md5, pair["pdf_path"].name, data)
-        mp = upload_meta_json(md5, pair["json_path"].name, json_data)
+        rp = minio.upload_raw_pdf(md5, pair["pdf_path"].name, data)
+        mp = minio.upload_meta_json(md5, pair["json_path"].name, json_data)
 
         async with sessionmaker() as s:
             row = (await s.execute(select(DocumentTask).where(DocumentTask.md5 == md5))).scalar_one_or_none()
             if row:
-                row.raw_minio_path = f"{MINIO_RAW_BUCKET}/{rp}"
-                row.meta_minio_path = f"{MINIO_META_BUCKET}/{mp}"
+                row.raw_minio_path = f"{s_cfg.minio_raw_bucket}/{rp}"
+                row.meta_minio_path = f"{s_cfg.minio_meta_bucket}/{mp}"
                 row.reset(reason="resubmit")
             else:
                 s.add(DocumentTask(
                     md5=md5, original_name=pair["pdf_path"].name,
-                    raw_minio_path=f"{MINIO_RAW_BUCKET}/{rp}",
-                    meta_minio_path=f"{MINIO_META_BUCKET}/{mp}",
+                    raw_minio_path=f"{s_cfg.minio_raw_bucket}/{rp}",
+                    meta_minio_path=f"{s_cfg.minio_meta_bucket}/{mp}",
                     status=TaskStatus.PENDING,
                 ))
             await s.commit()

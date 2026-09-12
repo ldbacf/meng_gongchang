@@ -12,13 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, select
 
+from app.infrastructure.settings import get_settings
 from app.interface.deps import get_container
-from src.config import CHUNK_SIZE, CORS_ORIGINS, MINIO_RAW_BUCKET
 from src.db import async_session
 from src.key_manager import get_key_manager
-from src.minio_client import check_parsed_exists, get_minio, upload_raw_pdf
 from src.models import DocumentTask, TaskStatus
-from src.redis_client import enqueue_batch
 from src.schemas import TaskCreateResponse, TaskStatusResponse
 
 
@@ -111,7 +109,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in CORS_ORIGINS.split(",") if o.strip()],
+    allow_origins=get_settings().cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -167,6 +165,8 @@ async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateRespons
 
     file_md5 = _md5(content)
 
+    minio = get_container().get_minio()
+
     stmt = select(DocumentTask).where(DocumentTask.md5 == file_md5)
     result = await session.execute(stmt)
     existing = result.scalar_one_or_none()
@@ -177,7 +177,7 @@ async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateRespons
             return await _copy_across_kb(
                 existing, file_md5, filename, content, kb_id, session
             )
-        if existing.status == TaskStatus.PARSED and check_parsed_exists(file_md5):
+        if existing.status == TaskStatus.PARSED and minio.check_parsed_exists(file_md5):
             await session.commit()
             return TaskCreateResponse(
                 id=existing.id, md5=existing.md5,
@@ -203,13 +203,13 @@ async def _handle_one_file(file, session, kb_id=None) -> tuple[TaskCreateRespons
 
     from src.models import default_pipeline_steps
 
-    raw_path = upload_raw_pdf(file_md5, filename, content)
+    raw_path = minio.upload_raw_pdf(file_md5, filename, content)
     steps = default_pipeline_steps()
     steps["upload"] = {"status": "done", "ts": _dt.now(_tz.utc).timestamp()}  # ts 统一 float
     task = DocumentTask(
         kb_id=kb_id,
         md5=file_md5, original_name=filename,
-        raw_minio_path=f"{MINIO_RAW_BUCKET}/{raw_path}",
+        raw_minio_path=f"{get_settings().minio_raw_bucket}/{raw_path}",
         status=TaskStatus.PENDING,
         pipeline_steps=steps,
     )
@@ -332,8 +332,8 @@ async def upload_documents_batch(
     kb_id: str | None = Query(None),
     _admin=Depends(require_admin),
 ):
-    if len(files) > CHUNK_SIZE:
-        raise HTTPException(400, f"单次最多 {CHUNK_SIZE} 个文件")
+    if len(files) > get_settings().chunk_size:
+        raise HTTPException(400, f"单次最多 {get_settings().chunk_size} 个文件")
 
     import uuid as _uuid
     _kb_id = _uuid.UUID(kb_id) if kb_id else None
@@ -415,16 +415,14 @@ async def stream_document_pdf(
     从 MinIO 读取 PDF 直接流式返回（不再暴露 presigned URL）。`Range: bytes=x-y`
     → `206 Partial Content` + `Content-Range`；越界 → 416；无 Range → 200 全量。
     """
-    from src.config import MINIO_RAW_BUCKET
-    from src.minio_client import get_minio
-
-    client = get_minio()
+    bucket = get_settings().minio_raw_bucket
+    client = get_container().get_minio().client
     object_path = await _find_pdf_object_name(doc_id)
     if not object_path:
         raise HTTPException(404, f"文档不存在: {doc_id}")
 
     try:
-        stat = client.stat_object(MINIO_RAW_BUCKET, object_path)
+        stat = client.stat_object(bucket, object_path)
     except Exception as e:
         raise HTTPException(502, f"读取 PDF 失败: {e}")
     total = stat.size
@@ -445,7 +443,7 @@ async def stream_document_pdf(
     headers.update(range_headers)
 
     try:
-        response = client.get_object(MINIO_RAW_BUCKET, object_path, offset=offset, length=length)
+        response = client.get_object(bucket, object_path, offset=offset, length=length)
     except Exception as e:
         raise HTTPException(502, f"读取 PDF 失败: {e}")
 
@@ -501,11 +499,13 @@ async def _find_pdf_object_name(doc_id: str) -> str | None:
     """
     from datetime import timedelta
 
-    from src.config import ES_INDEX, MINIO_RAW_BUCKET
-    from src.minio_client import get_minio
     from src.models import DocumentTask
 
     from src.db import async_session
+
+    bucket = get_settings().minio_raw_bucket
+    es_index = get_settings().es_index
+    client = get_container().get_minio().client
 
     # ── 1. 先查 DocumentTask 表 ──
     async with async_session() as session:
@@ -533,15 +533,13 @@ async def _find_pdf_object_name(doc_id: str) -> str | None:
             task = result.scalar_one_or_none()
 
         if task and task.raw_minio_path:
-            if task.raw_minio_path.startswith(f"{MINIO_RAW_BUCKET}/"):
-                return task.raw_minio_path[len(f"{MINIO_RAW_BUCKET}/"):]
+            if task.raw_minio_path.startswith(f"{bucket}/"):
+                return task.raw_minio_path[len(f"{bucket}/"):]
             return task.raw_minio_path
 
     # ── 2. 直接按 doc_id 前缀扫 MinIO ──
-    client = get_minio()
-
     for prefix in (f"{doc_id}/", doc_id):
-        objects = client.list_objects(MINIO_RAW_BUCKET, prefix=prefix, recursive=True)
+        objects = client.list_objects(bucket, prefix=prefix, recursive=True)
         for obj in objects:
             if obj.object_name.endswith(".pdf"):
                 return obj.object_name
@@ -552,7 +550,7 @@ async def _find_pdf_object_name(doc_id: str) -> str | None:
 
         es = get_es_client()
         resp = es.search(
-            index=ES_INDEX,
+            index=es_index,
             body={
                 "size": 1,
                 "query": {
@@ -571,7 +569,7 @@ async def _find_pdf_object_name(doc_id: str) -> str | None:
             md5 = hits[0]["_source"].get("md5")
             if md5:
                 objects = client.list_objects(
-                    MINIO_RAW_BUCKET, prefix=f"{md5}/", recursive=True
+                    bucket, prefix=f"{md5}/", recursive=True
                 )
                 for obj in objects:
                     if obj.object_name.endswith(".pdf"):

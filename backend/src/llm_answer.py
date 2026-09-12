@@ -19,10 +19,19 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.domain.knowledge_base import KBKind
 from app.domain.rag.prompts import CONTEXT_TEMPLATE, GENERIC_SYSTEM_PROMPT, SYSTEM_PROMPT
-from src.config import DEEPSEEK_ANSWER_MODEL
-from src.llm import get_chat_model
+from app.infrastructure.settings import get_settings
+from app.interface.deps import get_container
 
 logger = logging.getLogger("llm_answer")
+
+
+def _chat_model(streaming: bool):
+    """经容器取 DeepSeek 回答模型（模型名读 Settings 单一真相源）。"""
+    return get_container().get_llm().get_chat_model(
+        model=get_settings().deepseek_answer_model,
+        temperature=0.3,
+        streaming=streaming,
+    )
 
 
 def format_context(
@@ -151,7 +160,7 @@ def _answer_sync(
     """非流式：等待完整回答后返回"""
     sys_prompt = GENERIC_SYSTEM_PROMPT if kb_kind is KBKind.GENERIC else SYSTEM_PROMPT
     try:
-        chat = get_chat_model(model=DEEPSEEK_ANSWER_MODEL, temperature=0.3, streaming=False)
+        chat = _chat_model(streaming=False)
         resp = chat.invoke([
             SystemMessage(content=sys_prompt),
             HumanMessage(content=user_prompt),
@@ -171,7 +180,7 @@ def _answer_stream(
     """流式：逐 token yield"""
     sys_prompt = GENERIC_SYSTEM_PROMPT if kb_kind is KBKind.GENERIC else SYSTEM_PROMPT
     try:
-        chat = get_chat_model(model=DEEPSEEK_ANSWER_MODEL, temperature=0.3, streaming=True)
+        chat = _chat_model(streaming=True)
         stream = chat.stream([
             SystemMessage(content=sys_prompt),
             HumanMessage(content=user_prompt),
@@ -206,7 +215,7 @@ async def answer_stream_async(
     失败交给 error_handler 产 `t:error`，而非把错误拼进正文（A-4.4 修复）。
     """
     sys_prompt = GENERIC_SYSTEM_PROMPT if kb_kind is KBKind.GENERIC else SYSTEM_PROMPT
-    chat = get_chat_model(model=DEEPSEEK_ANSWER_MODEL, temperature=0.3, streaming=True)
+    chat = _chat_model(streaming=True)
     stream = chat.astream([
         SystemMessage(content=sys_prompt),
         HumanMessage(content=user_prompt),

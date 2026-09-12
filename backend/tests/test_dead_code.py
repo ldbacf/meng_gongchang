@@ -35,12 +35,12 @@ def test_process_document_removed():
     assert "chunk_document" in _read("app/application/graphs/subgraphs/index_document.py")
 
 
-def test_llm_wrappers_removed():
-    """src/llm 的重复 embedding wrapper（get_embedding_model/get_sentence_transformer）已删除；get_chat_model 保留。"""
-    text = _read("src/llm.py")
-    assert "get_embedding_model" not in text
-    assert "def get_sentence_transformer" not in text
-    assert "def get_chat_model" in text
+def test_llm_module_removed():
+    """src/llm.py 整模块已删除（get_chat_model 转发壳一并移除；调用方直连 container.get_llm()）。"""
+    assert not (_ROOT / "src/llm.py").exists()
+    # 调用方经容器取模型
+    text = _read("src/llm_answer.py")
+    assert "get_container().get_llm().get_chat_model(" in text
 
 
 def test_fetch_l0_meta_uses_kb_es_index():
@@ -73,7 +73,33 @@ def test_main_has_no_dead_imports():
 
 
 def test_scripts_dir_gone():
-    """scripts/ 目录已退役（内容全部迁入 cli/）。"""
+    """scripts/ 目录已退役（内容全部迁入 cli/）；手动脚本在 manual/（非 tests/）。"""
     scripts = _ROOT / "scripts"
     leftover = [p.name for p in scripts.rglob("*")] if scripts.exists() else []
     assert leftover == [], f"scripts/ 仍有残留: {leftover}"
+    assert (_ROOT / "manual").is_dir(), "手动脚本目录 manual/ 不存在"
+    assert not (_ROOT / "test").exists(), "旧 test/ 目录仍在（应已改名为 manual/）"
+
+
+def test_forwarding_shims_removed():
+    """阶段 5 收尾：4 个纯转发壳已删除（调用方直连 settings / container）。"""
+    for gone in ("src/config.py", "src/redis_client.py", "src/minio_client.py", "src/llm.py"):
+        assert not (_ROOT / gone).exists(), f"转发壳未删除: {gone}"
+
+
+def test_no_imports_from_removed_shims():
+    """全仓库不再 import 已删的转发壳（防止回退）。"""
+    banned = ("from src.config", "from src.redis_client", "from src.minio_client",
+              "from src.llm import", "import src.config", "import src.minio_client",
+              "import src.redis_client")
+    self_path = Path(__file__).resolve()
+    offenders = []
+    for root in ("app", "src", "cli", "tests", "manual"):
+        for path in (_ROOT / root).rglob("*.py"):
+            if "__pycache__" in str(path) or path.resolve() == self_path:
+                continue  # 跳过本文件（下面的 banned 字面量就是它自己）
+            text = path.read_text(encoding="utf-8")
+            for b in banned:
+                if b in text:
+                    offenders.append(f"{path.relative_to(_ROOT)}: {b}")
+    assert offenders == [], f"仍引用已删转发壳: {offenders}"

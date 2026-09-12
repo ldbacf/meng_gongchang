@@ -11,28 +11,28 @@ from __future__ import annotations
 from elasticsearch import Elasticsearch
 
 from app.infrastructure.es.es_mappings import ES_MAPPINGS, ES_SETTINGS
-from src.config import ES_HOST, ES_INDEX, ES_PASSWORD, ES_PORT, ES_USER
-
-INDEX_NAME = ES_INDEX
+from app.infrastructure.settings import get_settings
 
 
 def _get_es_client() -> Elasticsearch:
+    s = get_settings()
     kwargs = {"request_timeout": 30}
-    if ES_USER and ES_PASSWORD:
-        return Elasticsearch(f"http://{ES_USER}:{ES_PASSWORD}@{ES_HOST}:{ES_PORT}", **kwargs)
-    return Elasticsearch(f"http://{ES_HOST}:{ES_PORT}", **kwargs)
+    if s.es_user and s.es_password:
+        return Elasticsearch(f"http://{s.es_user}:{s.es_password}@{s.es_host}:{s.es_port}", **kwargs)
+    return Elasticsearch(f"http://{s.es_host}:{s.es_port}", **kwargs)
 
 
 def main() -> None:
+    index_name = get_settings().es_index
     es = _get_es_client()
-    if es.indices.exists(index=INDEX_NAME):
-        print(f"[ES] 删除已有索引: {INDEX_NAME}")
-        es.indices.delete(index=INDEX_NAME)
+    if es.indices.exists(index=index_name):
+        print(f"[ES] 删除已有索引: {index_name}")
+        es.indices.delete(index=index_name)
 
-    es.indices.create(index=INDEX_NAME, settings=ES_SETTINGS, mappings=ES_MAPPINGS)
-    print(f"[ES] 索引创建成功: {INDEX_NAME}")
+    es.indices.create(index=index_name, settings=ES_SETTINGS, mappings=ES_MAPPINGS)
+    print(f"[ES] 索引创建成功: {index_name}")
 
-    info = es.indices.get(index=INDEX_NAME)
+    info = es.indices.get(index=index_name)
     props = list(info[INDEX_NAME]["mappings"]["properties"].keys())
     print(f"[ES] 字段数: {len(props)}")
     print(f"[ES] 字段列表: {props}")

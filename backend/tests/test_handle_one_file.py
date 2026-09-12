@@ -16,6 +16,33 @@ import uuid
 import pytest
 
 import src.main as main_mod
+from app.infrastructure.container import AppContainer
+from app.infrastructure.settings import Settings
+from app.interface.deps import set_container
+
+
+class _FakeMinio:
+    """容器注入的 MinIO fake（`_handle_one_file` 经 container.get_minio() 调用）。"""
+
+    def __init__(self, parsed_exists: bool = False):
+        self._parsed_exists = parsed_exists
+        self.uploaded: list[tuple] = []
+
+    def check_parsed_exists(self, md5: str) -> bool:
+        return self._parsed_exists
+
+    def upload_raw_pdf(self, md5: str, name: str, data: bytes) -> str:
+        self.uploaded.append((md5, name))
+        return f"{md5}/raw/{name}"
+
+
+def _install_fake_minio(parsed_exists: bool = False) -> _FakeMinio:
+    fake = _FakeMinio(parsed_exists=parsed_exists)
+    set_container(AppContainer(
+        settings=Settings(_env_file=None, jwt_secret_key="x"),
+        fakes={"minio": fake},
+    ))
+    return fake
 
 
 class _Res:
@@ -57,14 +84,11 @@ class _Upload:
 
 
 @pytest.fixture
-def patch_minio(monkeypatch):
-    monkeypatch.setattr(
-        main_mod, "upload_raw_pdf",
-        lambda md5, name, data: f"{md5}/raw/{name}",
-    )
+def fake_minio():
+    return _install_fake_minio()
 
 
-async def test_new_file_returns_tuple(patch_minio):
+async def test_new_file_returns_tuple(fake_minio):
     """新文件：返回 (resp, fi) 且 fi 非 None（修复前这里是 None → TypeError）。"""
     session = _Session(existing=None)
     resp, fi = await main_mod._handle_one_file(_Upload("新文档.pdf", b"%PDF-1.4 x"), session)
@@ -75,9 +99,10 @@ async def test_new_file_returns_tuple(patch_minio):
     assert fi is not None and fi["md5"] and fi["data"]
     assert len(session.added) == 1
     assert session.added[0].kb_id is None
+    assert fake_minio.uploaded  # 经容器 MinIO 落 raw-docs
 
 
-async def test_new_file_with_kb_id(patch_minio):
+async def test_new_file_with_kb_id(fake_minio):
     kb_id = uuid.uuid4()
     session = _Session(existing=None)
     resp, fi = await main_mod._handle_one_file(_Upload("a.pdf", b"data"), session, kb_id=kb_id)
@@ -86,7 +111,7 @@ async def test_new_file_with_kb_id(patch_minio):
     assert session.added[0].kb_id == kb_id
 
 
-async def test_existing_unparsed_goes_retry(monkeypatch):
+async def test_existing_unparsed_goes_retry(fake_minio):
     """已存在同 md5 且未 parsed → 重试分支（返回 fi 由调用方重提交）。"""
     from src.models import DocumentTask, TaskStatus
 
@@ -102,11 +127,11 @@ async def test_existing_unparsed_goes_retry(monkeypatch):
     assert fi is not None
 
 
-async def test_existing_parsed_is_instant_upload(monkeypatch):
+async def test_existing_parsed_is_instant_upload():
     """已存在且 parsed 且 MinIO 有产物 → 秒传（fi 为 None）。"""
     from src.models import DocumentTask, TaskStatus
 
-    monkeypatch.setattr(main_mod, "check_parsed_exists", lambda md5: True)
+    _install_fake_minio(parsed_exists=True)
     task = DocumentTask(
         md5="b" * 32, original_name="y.pdf", raw_minio_path="raw-docs/y.pdf",
         status=TaskStatus.PARSED,

@@ -14,8 +14,8 @@ import asyncio
 from sqlalchemy import select
 
 from app.domain.knowledge_base import KBKind
+from app.infrastructure.settings import get_settings
 from app.interface.deps import get_container
-from src.config import MINIO_RAW_BUCKET
 from src.models import DocumentTask, KnowledgeBase, TaskStatus, default_pipeline_steps
 
 
@@ -63,7 +63,7 @@ async def backfill() -> None:
                 existing.add(real_md5)
 
                 pdf_path = None
-                for obj in mc.list_objects(MINIO_RAW_BUCKET, prefix=f"{real_md5}/", recursive=True):
+                for obj in mc.list_objects(get_settings().minio_raw_bucket, prefix=f"{real_md5}/", recursive=True):
                     if obj.object_name.endswith(".pdf"):
                         pdf_path = obj.object_name
                         break
@@ -80,7 +80,7 @@ async def backfill() -> None:
                     md5=real_md5,
                     batch_id=doc_id,  # 存 ES doc_id（如"7597"），删除时用
                     original_name=src.get("title_cn", "") or f"文献-{doc_id}",
-                    raw_minio_path=f"{MINIO_RAW_BUCKET}/{pdf_path}" if pdf_path else f"preloaded/{doc_id}",
+                    raw_minio_path=f"{get_settings().minio_raw_bucket}/{pdf_path}" if pdf_path else f"preloaded/{doc_id}",
                     status=TaskStatus.READY,
                     pipeline_steps=steps,
                 ))

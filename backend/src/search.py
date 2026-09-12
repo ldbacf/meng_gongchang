@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from src.config import ES_INDEX, MILVUS_COLLECTION
+from app.infrastructure.settings import get_settings
 
 # 阶段 2：SearchHit 契约统一来自 domain（re-export 兼容 test/ 手动脚本 `from src.search import SearchHit`）
 from app.domain.retrieval.search_hit import SearchHit  # noqa: F401
@@ -86,7 +86,7 @@ def _es_search(
         "_source": True,
     }
 
-    resp = es.search(index=es_index or ES_INDEX, body=body)
+    resp = es.search(index=es_index or get_settings().es_index, body=body)
 
     hits = []
     for i, hit in enumerate(resp["hits"]["hits"]):
@@ -129,11 +129,12 @@ def _milvus_search(
     mv.connect()
 
     # 存量 4 字段通用集合无 level/chunk_type/doi/title_cn 字段，需精简 output_fields
-    use_full_fields = not (milvus_collection and milvus_collection != MILVUS_COLLECTION)
+    default_collection = get_settings().milvus_collection
+    use_full_fields = not (milvus_collection and milvus_collection != default_collection)
     output_fields = None if use_full_fields else ["chunk_id", "doc_id", "title"]
 
     raw_hits = mv.search(
-        milvus_collection or MILVUS_COLLECTION,
+        milvus_collection or default_collection,
         embedding,
         filters=filters,
         top_k=top_k,

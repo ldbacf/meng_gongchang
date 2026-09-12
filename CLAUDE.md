@@ -66,8 +66,8 @@
 - 回答模型 = `deepseek-v4-flash`（.env 与 settings 默认值一致）
 
 ### 测试
-- `cd backend && uv run pytest`（26 个单测，96% 覆盖；契约/状态机/鉴权）
-- 手动脚本在 `backend/test/`，依赖真实 API key；**控制台乱码时加** `PYTHONIOENCODING=utf-8`
+- `cd backend && uv run pytest`（150 个单测；契约/状态机/鉴权/图/观测/CLI）
+- 手动脚本在 `backend/manual/`（**注意不是 `tests/`**），依赖真实 API key；**控制台乱码时加** `PYTHONIOENCODING=utf-8`
 
 ### 其它
 - 依赖用 `uv add` / `uv sync`，锁定在 `uv.lock`

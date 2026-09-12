@@ -9,16 +9,11 @@ from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import (
-    JWT_ACCESS_EXPIRE_MINUTES,
-    JWT_ALGORITHM,
-    JWT_REFRESH_EXPIRE_DAYS,
-    JWT_SECRET_KEY,
-)
+from app.infrastructure.settings import get_settings
 from src.db import get_db
 from src.models import User
 
-_SECRET = JWT_SECRET_KEY
+_SECRET = get_settings().jwt_secret_key
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -32,19 +27,21 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_ACCESS_EXPIRE_MINUTES)
+    s = get_settings()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=s.jwt_access_expire_minutes)
     payload = {"sub": user_id, "exp": expire, "type": "access"}
-    return jwt.encode(payload, _SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, _SECRET, algorithm=s.jwt_algorithm)
 
 
 def create_refresh_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(days=JWT_REFRESH_EXPIRE_DAYS)
+    s = get_settings()
+    expire = datetime.now(timezone.utc) + timedelta(days=s.jwt_refresh_expire_days)
     payload = {"sub": user_id, "exp": expire, "type": "refresh"}
-    return jwt.encode(payload, _SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, _SECRET, algorithm=s.jwt_algorithm)
 
 
 def decode_token(token: str) -> dict:
-    return jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    return jwt.decode(token, get_settings().jwt_secret_key, algorithms=[get_settings().jwt_algorithm])
 
 
 def get_token_remaining_ttl(token: str) -> int:
@@ -64,8 +61,8 @@ async def blacklist_token(token: str) -> None:
     if ttl <= 0:
         return
     try:
-        from src.redis_client import get_redis
-        r = await get_redis()
+        from app.interface.deps import get_container
+        r = get_container().get_redis()
         await r.setex(f"blacklist:{token}", ttl, "1")
     except Exception:
         pass  # Redis 不可用时静默跳过
@@ -73,8 +70,8 @@ async def blacklist_token(token: str) -> None:
 
 async def is_token_blacklisted(token: str) -> bool:
     try:
-        from src.redis_client import get_redis
-        r = await get_redis()
+        from app.interface.deps import get_container
+        r = get_container().get_redis()
         return await r.exists(f"blacklist:{token}") > 0
     except Exception:
         return False  # Redis 不可用时跳过黑名单检查

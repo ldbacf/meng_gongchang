@@ -19,6 +19,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
+from app.infrastructure.settings import get_settings
 from cli._common import (
     load_checkpoint,
     mark_done,
@@ -26,7 +27,6 @@ from cli._common import (
     scan_json_files,
     setup_script_logging,
 )
-from src.config import MILVUS_COLLECTION
 
 _FIELD_TITLE_FALLBACK = ("metadata", "title_cn")
 
@@ -67,7 +67,7 @@ def main() -> None:
     parser.add_argument("--mode", type=str, default="single", choices=["single", "batch"])
     parser.add_argument("--device", type=str, default="", help="设备 cpu / cuda:0（经容器 embedder）")
     parser.add_argument("--no-resume", action="store_true", help="禁用断点续跑")
-    parser.add_argument("--collection", type=str, default=MILVUS_COLLECTION)
+    parser.add_argument("--collection", type=str, default=get_settings().milvus_collection)
     args = parser.parse_args()
 
     logger = setup_script_logging("import_milvus")

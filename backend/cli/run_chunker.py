@@ -136,9 +136,8 @@ def scan_md5_list(minio_client, limit: int | None = None) -> list[str]:
     return md5_list
 
 
-def upload_phase(out_dir: Path, minio_client, logger) -> None:
-    from src.minio_client import chunk_json_exists, upload_chunk_json
-
+def upload_phase(out_dir: Path, minio, logger) -> None:
+    """上传本地 chunk JSON 到 MinIO chunks 桶（minio = MinioAdapter）。"""
     json_files = sorted(f for f in os.listdir(out_dir) if f.endswith(".json") and f != ".checkpoint.json")
     if not json_files:
         logger.info("无待上传文件")
@@ -171,7 +170,7 @@ def upload_phase(out_dir: Path, minio_client, logger) -> None:
                 continue
 
             try:
-                if chunk_json_exists(uuid):
+                if minio.chunk_json_exists(uuid):
                     stats["skipped"] += 1
                     pbar.update(1)
                     continue
@@ -180,7 +179,7 @@ def upload_phase(out_dir: Path, minio_client, logger) -> None:
 
             try:
                 json_bytes = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-                upload_chunk_json(uuid, json_bytes)
+                minio.upload_chunk_json(uuid, json_bytes)
                 stats["success"] += 1
             except Exception as e:
                 logger.error("[%s] 上传失败: %s", fname, e)
@@ -215,10 +214,11 @@ def main() -> None:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    minio_client = get_container().get_minio().client
+    minio = get_container().get_minio()
+    minio_client = minio.client  # 原始客户端：fetch/scan 需要 get_object/list_objects
 
     if args.upload_only:
-        upload_phase(out_dir, minio_client, logger)
+        upload_phase(out_dir, minio, logger)
         return
 
     if args.md5:
@@ -315,7 +315,7 @@ def main() -> None:
     logger.info("输出目录: %s", out_dir.resolve())
 
     if args.upload:
-        upload_phase(out_dir, minio_client, logger)
+        upload_phase(out_dir, minio, logger)
 
 
 if __name__ == "__main__":

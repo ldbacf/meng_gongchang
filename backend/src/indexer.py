@@ -8,10 +8,10 @@ from app.infrastructure.es.es_mappings import ES_SETTINGS, build_generic_kb_mapp
 
 
 def read_parsed_markdown(md5: str) -> str:
-    """从 MinIO parsed-data/{md5}/ 读取 full.md"""
-    from src.minio_client import read_parsed_markdown as _read
+    """从 MinIO parsed-data/{md5}/ 读取 full.md（经容器 MinIO 适配器）。"""
+    from app.interface.deps import get_container
 
-    return _read(md5)
+    return get_container().get_minio().read_parsed_markdown(md5)
 
 
 def es_bulk_write(

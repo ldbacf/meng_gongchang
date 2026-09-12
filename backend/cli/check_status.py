@@ -48,11 +48,11 @@ async def _run(detail: bool) -> None:
         log.info("  双验证: status=parsed 的 MinIO 一致性")
         log.info("=" * 45)
 
-        from src.minio_client import check_parsed_exists
+        minio = get_container().get_minio()
 
         valid = lost = 0
         for task in sorted(parsed, key=lambda x: x.updated_at or x.created_at, reverse=True):
-            if check_parsed_exists(task.md5):
+            if minio.check_parsed_exists(task.md5):
                 valid += 1
             else:
                 lost += 1

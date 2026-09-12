@@ -9,10 +9,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.knowledge_base import KBKind, resolve_kb_kind
+from app.infrastructure.settings import get_settings
 from src.auth import hash_password, require_admin
-from src.config import MINIO_RAW_BUCKET
 from src.db import get_db
-from src.minio_client import upload_raw_pdf
 from src.models import (
     DocumentTask,
     KnowledgeBase,
@@ -318,6 +317,10 @@ async def upload_document(
 
     file_md5 = hashlib.md5(content).hexdigest()
 
+    from app.interface.deps import get_container
+
+    minio = get_container().get_minio()
+
     # Check for existing document（O-3.7：KB 内查重；跨 KB 复制；禁止 reassign kb_id）
     existing_result = await db.execute(
         select(DocumentTask).where(DocumentTask.md5 == file_md5)
@@ -334,14 +337,16 @@ async def upload_document(
                 id=resp.id, original_name=resp.original_name, md5=resp.md5,
                 status=resp.status, kb_id=kb_id,
             )
-        if existing.status == TaskStatus.PARSED and check_parsed_exists(file_md5):
+        if existing.status == TaskStatus.PARSED and minio.check_parsed_exists(file_md5):
             await db.commit()
             await broadcast_doc_update(existing)
             return DocumentResponse.model_validate(existing)
         # 同 KB 已存在：提示已存在（不 reassign、不自动重提交）
         return DocumentResponse.model_validate(existing)
 
-    raw_path = upload_raw_pdf(file_md5, file.filename or "unknown", content)
+    raw_path = minio.upload_raw_pdf(
+        file_md5, file.filename or "unknown", content
+    )
     from src.models import default_pipeline_steps
     steps = default_pipeline_steps()
     steps["upload"] = {"status": "done", "ts": datetime.now(timezone.utc).isoformat()}
@@ -349,7 +354,7 @@ async def upload_document(
         kb_id=kb_id,
         md5=file_md5,
         original_name=file.filename or "unknown",
-        raw_minio_path=f"{MINIO_RAW_BUCKET}/{raw_path}",
+        raw_minio_path=f"{get_settings().minio_raw_bucket}/{raw_path}",
         status=TaskStatus.PENDING,
         pipeline_steps=steps,
     )
