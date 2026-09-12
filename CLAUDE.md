@@ -27,10 +27,29 @@
 2. DB schema 由 Alembic 管理（**已移除 lifespan create_all**）：
    - 全新库：`uv run alembic upgrade head`
    - 已有库：`uv run alembic stamp 0002_checkpoint`（标记基线，勿重复建表）
-3. 后端：`cd backend && uv run uvicorn src.main:app --host 0.0.0.0 --port 8000`
-4. 前端：`cd frontend && npm run dev`（端口 **5171**，勿用 5173——在 Windows 保留端口段内无法绑定）
+3. 后端 API（**必须用 `medrag-api`，不要直接 `uvicorn src.main:app`**）：
+   ```bash
+   cd backend && uv run medrag-api            # == uvicorn src.main:app，但先切 SelectorEventLoop
+   ```
+   > **为什么**：checkpointer（AsyncPostgresSaver）经 psycopg async 连 PG，而 psycopg async
+   > **不支持 Windows 默认的 ProactorEventLoop** → 直接 uvicorn 起会建不出 checkpointer，
+   > 问答图不可用（日志出现"警告: Postgres checkpointer 创建失败"）。入口 `src/run_api.py`
+   > 会先设 `WindowsSelectorEventLoopPolicy`。**勿加 `--workers`/`--reload`**（子进程会强制
+   > 回 Proactor）；多进程请用 compose 的 `backend` 服务（Linux 镜像无此限制）。
+4. 入库 worker（独立终端，消费队列）：
+   ```bash
+   cd backend && uv run pipeline-worker
+   ```
+5. embedding 服务（可选但推荐，模型只加载一次；.env 设 `EMBEDDING_MODE=remote`）：
+   ```bash
+   cd backend && uv run embedding-server      # 8084
+   ```
+6. 前端：`cd frontend && npm run dev`（端口 **5171**，勿用 5173——在 Windows 保留端口段内无法绑定）
 
-**端口约定**：后端 8000；Attu 8002（勿占用 8000）；前端 5171。
+**Docker 全量起**：`cd backend && docker compose --profile app up -d --build`（含 backend/ingestion-worker/embedding-service）
+
+**端口约定**：后端 8000；Attu 8002（勿占用 8000）；embedding 8084；前端 5171。
+**入口**：`medrag-api`（API）/ `pipeline-worker`（worker）/ `embedding-server`（嵌入服务）/ `medrag-*`（运维 CLI，见 `cli/`）。
 
 ---
 

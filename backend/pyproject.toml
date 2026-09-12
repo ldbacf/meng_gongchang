@@ -62,6 +62,8 @@ dev = [
 packages = ["src", "app", "cli"]
 
 [project.scripts]
+# API 启动入口（含 Windows SelectorEventLoop 修正，见 src/run_api.py）
+medrag-api = "src.run_api:main"
 pipeline-api = "src.main:app"
 # 阶段 3：独立 worker 进程（驱动 IngestionGraph）
 pipeline-worker = "app.application.worker:main"

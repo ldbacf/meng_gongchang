@@ -382,6 +382,13 @@ class AppContainer:
                 print("[API] Postgres checkpointer 就绪")
             except Exception as e:
                 print(f"[API] 警告: Postgres checkpointer 创建失败（图不可用）: {e}")
+                msg = str(e)
+                if "ProactorEventLoop" in msg:
+                    print(
+                        "[API] 提示: Windows 下请用 `uv run medrag-api` 启动（会切到 "
+                        "SelectorEventLoop）；直接 `uvicorn src.main:app` 无法建 checkpointer，"
+                        "问答图将不可用。"
+                    )
 
         self._started = True
 
