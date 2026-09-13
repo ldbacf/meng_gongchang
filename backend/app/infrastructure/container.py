@@ -360,14 +360,22 @@ class AppContainer:
         await self.get_minio().init_buckets()
         # 预热 bge-m3：local 模式启动加载一次常驻；
         # remote 模式只做 /health 探测（模型已在 embedding-service 端常驻，本进程不再加载）。
+        # 两个分支都用 getattr 容错：测试注入的 fake embedder 只实现必要方法，
+        # 不该因为缺预热/探针方法而让 start() 崩掉。
+        embedder = self.get_embedder()
         if self.get_settings().embedding_mode == "remote":
-            if self.get_embedder().check_health():
+            probe = getattr(embedder, "check_health", None)
+            if probe is None:
+                pass  # fake / 自定义实现：无健康探针，跳过
+            elif probe():
                 print("[API] embedding-service 就绪")
             else:
                 print("[API] 警告: embedding-service 不可达（检索/索引将失败，请先起 embedding-server）")
         else:
-            self.get_embedder().get_hf_embeddings()
-            print("[API] bge-m3 模型加载完成")
+            warm = getattr(embedder, "get_hf_embeddings", None)
+            if warm is not None:
+                warm()
+                print("[API] bge-m3 模型加载完成")
 
         # checkpoint saver（AsyncPostgresSaver，表已由 Alembic 0002 建好）
         # 创建失败降级（如 Windows ProactorEventLoop 下 psycopg 不可用）——
@@ -385,9 +393,11 @@ class AppContainer:
                 msg = str(e)
                 if "ProactorEventLoop" in msg:
                     print(
-                        "[API] 提示: Windows 下请用 `uv run medrag-api` 启动（会切到 "
-                        "SelectorEventLoop）；直接 `uvicorn app.main:app` 无法建 checkpointer，"
-                        "问答图将不可用。"
+                        "[API] 提示: 当前事件循环是 ProactorEventLoop，psycopg async 不可用。"
+                        "Windows 下请用 `uv run medrag-api` 启动——它会设 SelectorEventLoopPolicy "
+                        "并给 uvicorn 传 loop=\"none\"（uvicorn ≥0.36 会用 loop_factory 绕过 policy，"
+                        "默认的 auto/asyncio 在 Windows 上被硬编码为 ProactorEventLoop）。"
+                        "详见 app/run_api.py。"
                     )
 
         self._started = True

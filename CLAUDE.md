@@ -29,13 +29,25 @@
    - 已有库：`uv run alembic stamp 0002_checkpoint`（标记基线，勿重复建表）
 3. 后端 API（**必须用 `medrag-api`，不要直接 `uvicorn app.main:app`**）：
    ```bash
-   cd backend && uv run medrag-api            # == uvicorn app.main:app，但先切 SelectorEventLoop
+   cd backend && uv run medrag-api
    ```
    > **为什么**：checkpointer（AsyncPostgresSaver）经 psycopg async 连 PG，而 psycopg async
-   > **不支持 Windows 默认的 ProactorEventLoop** → 直接 uvicorn 起会建不出 checkpointer，
-   > 问答图不可用（日志出现"警告: Postgres checkpointer 创建失败"）。入口 `app/run_api.py`
-   > 会先设 `WindowsSelectorEventLoopPolicy`。**勿加 `--workers`/`--reload`**（子进程会强制
-   > 回 Proactor）；多进程请用 compose 的 `backend` 服务（Linux 镜像无此限制）。
+   > **不支持 Windows 的 ProactorEventLoop** → checkpointer 建不出来 → QAGraph 不可用
+   > → **问答挂掉**（日志出现"警告: Postgres checkpointer 创建失败"）。
+   >
+   > **坑①（uvicorn ≥0.36 行为变更）**：光 `set_event_loop_policy(...)` **不够**。uvicorn 0.36
+   > 起把 loop_factory 显式传给 `asyncio.run(..., loop_factory=...)`，而**传了 loop_factory 就
+   > 绕过 event loop policy**；且 uvicorn 在 Windows 上把它硬编码为 `ProactorEventLoop`
+   > （`uvicorn/loops/asyncio.py`）。所以 `app/run_api.py` 除了设
+   > `WindowsSelectorEventLoopPolicy`，还给 uvicorn 传 **`loop="none"`**（→ loop_factory=None
+   > → 回落到 policy）。**勿加 `--workers`/`--reload`**（子进程路径不同）；多进程请用
+   > compose 的 `backend` 服务（Linux 镜像无此限制）。
+   >
+   > **坑②（`localhost` 会静默挂住）**：`.env` 里 **`POSTGRES_HOST` 必须是 `127.0.0.1`，不能写
+   > `localhost`**。这台 Windows 上 `localhost` 会让 psycopg async 的 `connect()` **静默卡死**
+   > （不报错、不超时），表现为服务停在"embedding-service 就绪"之后、再无输出。
+   > asyncpg（SQLAlchemy engine）容忍 `localhost`，所以只有 checkpointer 这一步受影响。
+   > `REDIS_HOST` / `MINIO_ENDPOINT` 同样是 `127.0.0.1`（同一个坑，早先已修）。
 4. 入库 worker（独立终端，消费队列）：
    ```bash
    cd backend && uv run pipeline-worker

@@ -50,8 +50,13 @@ class _FakeMinio:
 
 
 class _FakeEmbedder:
+    """两种 embedding 模式的 fake（local: get_hf_embeddings；remote: check_health）。"""
+
     def get_hf_embeddings(self):
         return self
+
+    def check_health(self) -> bool:
+        return True
 
     def embed_documents(self, texts):
         return [[0.1] * 4 for _ in texts]

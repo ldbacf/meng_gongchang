@@ -13,8 +13,19 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 
 def normalize_dsn(dsn: str) -> str:
-    """SQLAlchemy asyncpg URL → psycopg 可用的 postgresql:// 格式。"""
-    return dsn.replace("postgresql+asyncpg://", "postgresql://", 1)
+    """SQLAlchemy asyncpg URL → psycopg 可用的 postgresql:// 格式。
+
+    顺带把 host 的 `localhost` 归一成 `127.0.0.1`：本机 Windows 上 **psycopg async 连
+    `localhost` 会静默卡死**（不报错、不超时，服务停在启动中途），而 asyncpg 容忍——
+    所以只有 checkpointer 这一步中招，极难排查。语义上 localhost ≡ 127.0.0.1，归一安全。
+    （排查记录：`docs/error_ok/启动端口问题记录.md` 问题 4）
+    """
+    dsn = dsn.replace("postgresql+asyncpg://", "postgresql://", 1)
+    return (
+        dsn.replace("@localhost:", "@127.0.0.1:")
+           .replace("@localhost/", "@127.0.0.1/")
+           .replace("@localhost?", "@127.0.0.1?")
+    )
 
 
 async def create_pg_saver(dsn: str) -> AsyncPostgresSaver:
