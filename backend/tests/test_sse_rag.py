@@ -79,7 +79,11 @@ def test_metrics_single_source_fields():
 
     ans_step = build_rag_step("answer", elapsed_ms=4, context_chunks=5, total_tokens=100, total_elapsed_ms=400)
     assert set(ans_step["metrics"].keys()) == {"model", "context_chunks", "total_tokens", "total_elapsed_ms", "degraded"}
-    assert ans_step["metrics"]["model"] == "DeepSeek-V4-Pro"
+    # 断言**跟随配置**而非某个字面量：曾因这里写死 "DeepSeek-V4-Pro" 而实际模型早已是
+    # `deepseek-v4-flash`，导致 UI 谎报所用模型。改成字面量只会把同一个坑再埋一次。
+    from app.infrastructure.settings import get_settings
+
+    assert ans_step["metrics"]["model"] == get_settings().deepseek_answer_model
 
     assert set(STEP_TITLES.keys()) == {"intent", "retrieval", "fusion", "answer"}
 

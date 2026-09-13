@@ -16,9 +16,11 @@ STEP_TITLES = {
     "answer": "生成回答",
 }
 
+# fusion 的 reranker 展示短名（配置项 `siliconflow_rerank_model` 为 "Qwen/Qwen3-Reranker-4B"，
+# 这里省去 org 前缀保持 UI 简洁 —— 属于**展示裁剪**，若要一并改为配置驱动，UI 文案会变成带
+# 前缀的全名）。answer 的模型名不在此处：它必须取自配置，见 `_answer_metrics`。
 STEP_MODELS = {
     "fusion": "Qwen3-Reranker-4B",
-    "answer": "DeepSeek-V4-Pro",
 }
 
 
@@ -63,8 +65,16 @@ def _fusion_metrics(
 def _answer_metrics(
     *, context_chunks=0, total_tokens=0, total_elapsed_ms=0, degraded=False,
 ) -> dict:
+    """answer 步 metrics。`model` **取自配置**（`settings.deepseek_answer_model`）。
+
+    这里曾硬编码 "DeepSeek-V4-Pro"，而真正决定用哪个模型的 `llm_answer` 读的是 settings
+    —— 同一个人名写两份，于是配置早已是 `deepseek-v4-flash` 时，UI 面板仍显示 V4-Pro，
+    **谎报所用模型**。模型名只有一个真相源：配置。
+    """
+    from app.infrastructure.settings import get_settings
+
     return {
-        "model": STEP_MODELS["answer"],
+        "model": get_settings().deepseek_answer_model,
         "context_chunks": context_chunks,
         "total_tokens": total_tokens,
         "total_elapsed_ms": total_elapsed_ms,

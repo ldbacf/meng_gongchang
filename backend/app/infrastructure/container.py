@@ -370,7 +370,13 @@ class AppContainer:
             elif probe():
                 print("[API] embedding-service 就绪")
             else:
-                print("[API] 警告: embedding-service 不可达（检索/索引将失败，请先起 embedding-server）")
+                # 注意：embedding-server 是**启动即加载** bge-m3 的，加载期间 uvicorn
+                # 不接收连接 → 此探针必然失败。所以"不可达"≠"没启动"，别写成误导性提示。
+                print(
+                    "[API] 警告: embedding-service 未就绪（检索/索引将失败）。"
+                    "若刚启动它，可能仍在加载 bge-m3，稍等几秒；"
+                    "否则请确认 `uv run embedding-server`（8084）在跑。"
+                )
         else:
             warm = getattr(embedder, "get_hf_embeddings", None)
             if warm is not None:

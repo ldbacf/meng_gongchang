@@ -1,5 +1,8 @@
 """
-LLM 回答生成 — reranked hits → 拼 context → DeepSeek-V4-Pro → 回答
+LLM 回答生成 — reranked hits → 拼 context → DeepSeek → 回答
+
+模型名取自配置 `settings.deepseek_answer_model`（.env: `DEEPSEEK_ANSWER_MODEL`），
+当前值 `deepseek-v4-flash`。**不要在本文件或别处再写死模型名**。
 
 用法:
     from app.infrastructure.adapters.llm_answer import answer, answer_stream

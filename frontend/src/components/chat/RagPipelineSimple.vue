@@ -217,7 +217,7 @@ const stepList = computed(() => [
                   检索词：
                   <span class="font-medium text-slate-700">{{ (getStep(item.key)!.metrics as IntentMetrics).rewritten_query }}</span>
                 </p>
-                <div v-if="(getStep(item.key)!.metrics as IntentMetrics).keywords.length" class="flex flex-wrap gap-1 mb-1">
+                <div v-if="(getStep(item.key)!.metrics as IntentMetrics).keywords?.length" class="flex flex-wrap gap-1 mb-1">
                   <span
                     v-for="kw in (getStep(item.key)!.metrics as IntentMetrics).keywords"
                     :key="kw"
@@ -315,7 +315,7 @@ const stepList = computed(() => [
                 </p>
                 <!-- Score bars -->
                 <div
-                  v-if="(getStep(item.key)!.metrics as FusionMetrics).top_scores.length"
+                  v-if="(getStep(item.key)!.metrics as FusionMetrics).top_scores?.length"
                   class="space-y-1.5"
                 >
                   <div
@@ -367,17 +367,18 @@ const stepList = computed(() => [
                 </div>
               </template>
 
-              <!-- Generic fallback: pending step with summary (non-answer) -->
+              <!-- Generic fallback: pending step (non-answer) -->
+              <!-- 不要求 summary：pending 帧本就不带 summary，若必须存在则该分支恒不显示，
+                   展开后是一块空白。这里给默认文案，pending 总有可见反馈。 -->
               <template
                 v-if="
                   item.key !== 'answer' &&
                   getStep(item.key)!.status === 'pending' &&
-                  getStep(item.key)!.summary &&
                   !getStep(item.key)!.metrics
                 "
               >
                 <p class="text-xs text-slate-500 text-center animate-pulse">
-                  {{ getStep(item.key)!.summary }}
+                  {{ getStep(item.key)!.summary || '处理中...' }}
                 </p>
               </template>
 

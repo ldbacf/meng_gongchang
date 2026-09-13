@@ -174,7 +174,12 @@ export const useChatStore = defineStore('chat', () => {
             title: msg.title,
             summary: msg.summary,
             elapsed_ms: msg.elapsed_ms,
-            metrics: msg.metrics,
+            // pending 帧的 metrics 是 `{}`（后端 frame_step 的 `metrics or {}`）。
+            // 空对象是 truthy，会让 `v-if="...metrics"` 放行，进而渲染尚未产出的
+            // 字段（top_scores/keywords 等）→ undefined.length 抛错并打崩整棵 vdom。
+            // 故 pending 一律置 undefined —— 这正是模板的契约（`metrics?:` 可选，
+            // 且 `status === 'pending' && !metrics` 分支就是为它写的）。
+            metrics: msg.s === 'done' ? msg.metrics : undefined,
           },
         }
         break

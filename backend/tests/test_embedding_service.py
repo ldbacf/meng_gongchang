@@ -91,9 +91,13 @@ class _FakeModel:
 
 @pytest.fixture
 def server_env(monkeypatch):
-    """隔离 Settings（禁读 .env）+ mock 模型（不加载 4.3G bge-m3）。"""
+    """隔离 Settings（禁读 .env）+ mock 模型（不加载 4.3G bge-m3）。
+
+    `_model` 一并置为 fake：`/health` 以 `_model is not None` 判就绪，不置则报 `loading`。
+    """
     s = Settings(_env_file=None, jwt_secret_key="x", embedding_dim=1024)
     monkeypatch.setattr(embedding_server, "get_settings", lambda: s)
+    monkeypatch.setattr(embedding_server, "_model", _FakeModel())
     monkeypatch.setattr(embedding_server, "_get_model", lambda: _FakeModel())
     return s
 
@@ -102,6 +106,37 @@ def test_embedding_server_health(server_env):
     r = TestClient(app).get("/health")
     assert r.status_code == 200
     assert r.json() == {"status": "ok", "dim": 1024}
+
+
+def test_embedding_server_health_reports_loading_before_model_ready(monkeypatch):
+    """模型未加载时 /health 报 `loading` —— API 的 check_health 判据是 status=="ok"，
+    因此不会在模型没就绪时误报"就绪"（E-2b）。"""
+    s = Settings(_env_file=None, jwt_secret_key="x", embedding_dim=1024)
+    monkeypatch.setattr(embedding_server, "get_settings", lambda: s)
+    monkeypatch.setattr(embedding_server, "_model", None)
+
+    r = TestClient(app).get("/health")
+    assert r.status_code == 200
+    assert r.json()["status"] == "loading"
+
+
+def test_embedding_server_loads_model_on_startup(monkeypatch):
+    """模型在**启动**（lifespan）时加载，而非等首个请求（E-2c）。
+
+    常驻服务的"只加载一次"不该让第一个用户替全服务等加载。
+    """
+    s = Settings(_env_file=None, jwt_secret_key="x", embedding_dim=1024)
+    monkeypatch.setattr(embedding_server, "get_settings", lambda: s)
+    monkeypatch.setattr(embedding_server, "_model", None)
+
+    calls: list[int] = []
+    monkeypatch.setattr(
+        embedding_server, "_get_model", lambda: (calls.append(1), _FakeModel())[1]
+    )
+
+    with TestClient(app):  # 上下文管理器才触发 lifespan
+        assert len(calls) == 1, "启动应加载模型一次"
+    assert len(calls) == 1, "启停一轮只加载一次（非每请求）"
 
 
 def test_embedding_server_embed_single(server_env):

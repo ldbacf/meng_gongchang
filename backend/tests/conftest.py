@@ -5,7 +5,9 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -13,6 +15,22 @@ from typing import Any
 import pytest
 
 TEST_JWT_SECRET = "pytest-test-secret"
+
+
+# ── 事件循环：Windows 下统一 SelectorEventLoop ──────────────────────────────
+# 直接设 policy（而非覆盖 `event_loop_policy` fixture —— 那在 pytest-asyncio 1.4 已弃用，
+# 且新钩子 `pytest_asyncio_loop_factories` 一旦注册就必须对所有平台返回映射）。
+# 插件在未显式指定 loop factory 时，正是回落到"当前 policy"来造循环，故此处设置即生效。
+#
+# 两点理由：
+# 1. **与生产一致** —— `medrag-api`（app/run_api.py）就设 SelectorEventLoopPolicy；
+#    测试跑同一条循环，才能在这里暴露 psycopg/事件循环类问题（如 checkpointer 静默失效）。
+# 2. **psycopg async 在 ProactorEventLoop 上直接不可用**（InterfaceError），不设则任何走
+#    checkpointer 的测试必然失败，而生产是好的 —— 假阴性。
+# asyncpg（SQLAlchemy engine）两种循环都兼容；全仓无 `asyncio.subprocess` 用法，
+# 而 Proactor 的唯一刚需正是子进程 —— 该刚需不存在，故可安全全局切换。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 @contextmanager

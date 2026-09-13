@@ -1,5 +1,5 @@
 """
-测试 LLM 回答生成 — DeepSeek-V4-Pro
+测试 LLM 回答生成 — DeepSeek（模型名取自 .env: DEEPSEEK_ANSWER_MODEL）
 
 用法:
     uv run python test/test_llm_answer.py              # 全部
