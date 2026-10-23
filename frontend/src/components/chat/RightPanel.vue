@@ -10,6 +10,8 @@ const props = defineProps<{
   pdfUrl: string | null
   pdfLoading: boolean
   showBackButton: boolean
+  /** pdf.js Range 请求所需的附加头（Authorization） */
+  pdfHeaders?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -146,6 +148,7 @@ onBeforeUnmount(() => {
             v-else-if="pdfUrl"
             :url="pdfUrl"
             :title="activeCitation?.title"
+            :headers="pdfHeaders"
           />
         </div>
       </div>
