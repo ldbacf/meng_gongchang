@@ -246,6 +246,12 @@ services:
   # 单独 profile，默认不起（`docker compose up` 不受影响）。
   #   docker compose --profile app --profile monitoring up -d prometheus grafana
   # 后端只暴露 /metrics；抓取与告警规则在 deploy/monitoring/ 下（不进业务进程）。
+  #
+  # 注意：**不能写 `depends_on: backend`**——backend 属 "app" profile，只启用
+  # "monitoring" 时 compose 会判定为 undefined service 并整体拒绝：
+  #   service "prometheus" depends on undefined service "backend": invalid compose project
+  # 监控与后端生命周期解耦：后端没起时抓取目标 down，BackendDown 告警自然会报，
+  # 这正是该有的行为，不需要用 depends_on 去耦合。
   prometheus:
     profiles: ["monitoring"]
     image: prom/prometheus:v2.55.1
@@ -260,8 +266,6 @@ services:
       - ./deploy/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./deploy/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - ./data/prometheus:/prometheus
-    depends_on:
-      - backend
 
   grafana:
     profiles: ["monitoring"]
@@ -276,5 +280,3 @@ services:
       - "3000:3000"
     volumes:
       - ./data/grafana:/var/lib/grafana
-    depends_on:
-      - prometheus
