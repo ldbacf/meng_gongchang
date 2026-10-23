@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Message } from '@/types'
+import type { Citation, Message } from '@/types'
 import { useMarkdown } from '@/composables/useMarkdown'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useChatStore } from '@/stores/chat'
@@ -16,7 +16,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'citation-click': [id: string]
+  'citation-click': [citation: Citation]
   'show-citation-list': []
 }>()
 
@@ -32,9 +32,12 @@ const renderedContent = computed(() => {
 
 function handleContentClick(e: MouseEvent) {
   const target = (e.target as HTMLElement).closest('.citation-tag') as HTMLElement | null
-  if (target?.dataset.citationId) {
-    emit('citation-click', target.dataset.citationId)
-  }
+  const cid = target?.dataset.citationId
+  if (!cid) return
+  // 在**本消息**的引用里解析，而不是全局按序号查 —— 序号（"1".."5"）是每条回答内部的编号，
+  // 跨消息重复；曾用全局 map 按 id 去重，多轮会话里点 [2] 会打开上一轮的文献。
+  const cite = props.message.citations?.find((c) => String(c.id) === cid)
+  if (cite) emit('citation-click', cite)
 }
 
 const copied = ref(false)
@@ -172,6 +175,7 @@ function toggleRag() {
           <div
             v-if="renderedContent"
             class="markdown-body text-sm leading-relaxed text-slate-700"
+            :class="{ 'is-streaming': isStreaming }"
             v-html="renderedContent"
             @click="handleContentClick"
           />
@@ -205,9 +209,9 @@ function toggleRag() {
           <p class="text-xs text-red-600 leading-relaxed">{{ chatStore.streamError }}</p>
         </div>
         <CitationSummary
-          v-if="message.citations && !isStreaming"
+          v-if="message.citations && message.citations.length && !isStreaming"
           :citations="message.citations"
-          @select-citation="(cite) => emit('citation-click', cite.id)"
+          @select-citation="(cite) => emit('citation-click', cite)"
         />
       </div>
     </div>

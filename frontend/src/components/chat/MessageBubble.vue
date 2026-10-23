@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Message } from '@/types'
+import type { Citation, Message } from '@/types'
 import UserMessage from './UserMessage.vue'
 import AiMessage from './AiMessage.vue'
 
@@ -10,7 +10,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'citation-click': [id: string]
+  'citation-click': [citation: Citation]
   'show-citation-list': []
 }>()
 </script>
@@ -22,7 +22,7 @@ const emit = defineEmits<{
     :message="message"
     :is-streaming="isStreaming"
     :stream-content="streamContent"
-    @citation-click="(id) => emit('citation-click', id)"
+    @citation-click="(cite) => emit('citation-click', cite)"
     @show-citation-list="emit('show-citation-list')"
   />
 </template>

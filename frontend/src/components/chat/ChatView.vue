@@ -34,6 +34,8 @@ const streamMessage = {
 const streamMessageWithRagSteps = computed(() => ({
   ...streamMessage,
   ragSteps: chatStore.streamRagSteps,
+  // 流式期间也要能点引用：citations 走 store 的累积数组
+  citations: chatStore.streamCitations,
 }))
 
 // ── Right panel state ──
@@ -46,11 +48,14 @@ const pdfLoading = ref(false)
 const showBackButton = ref(false)
 
 const uniqueCitations = computed(() => {
+  // key 必须含消息 id：cite.id 是「该条回答内的序号」("1".."5")，跨消息会重复。
+  // 只用 id 做 key 会让多轮会话里第 2/3 轮的引用被第 1 轮的同号引用顶掉。
   const map = new Map<string, Citation>()
   for (const msg of chatStore.messages) {
     for (const cite of msg.citations ?? []) {
-      if (!map.has(cite.id)) {
-        map.set(cite.id, cite)
+      const key = `${msg.id}:${cite.id}`
+      if (!map.has(key)) {
+        map.set(key, cite)
       }
     }
   }
@@ -93,12 +98,9 @@ async function loadPdfForCitation(citation: Citation) {
   }
 }
 
-async function handleCitationClick(citationId: string) {
+async function handleCitationClick(citation: Citation) {
   showBackButton.value = false
-  const citation = uniqueCitations.value.find((c) => c.id === citationId)
-  if (citation) {
-    await loadPdfForCitation(citation)
-  }
+  await loadPdfForCitation(citation)
 }
 
 function showCitationList() {

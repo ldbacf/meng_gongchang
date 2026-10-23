@@ -83,10 +83,27 @@ export interface Conversation {
 
 // ── Single-line SSE message types ──
 
+/**
+ * SSE `cite` 帧里的一条引用。
+ *
+ * 后端 `frame_cite(citations: list)` 一次发整组（`{t:'cite', citations:[...]}`），
+ * 不是一条一帧。字段与落库的 Citation 同形，`idx` 是正文里的展示序号（"1".."5"）。
+ */
+export interface CitationFrame {
+  idx: string | number
+  doc_id?: string | null
+  title: string
+  source?: string
+  snippet: string
+  md5?: string
+  relevance?: number
+}
+
 export type SSEMessage =
   | { t: 'step'; k: 'intent' | 'retrieval' | 'fusion' | 'answer'; s: 'pending' | 'done'; title: string; elapsed_ms?: number; summary?: string; metrics?: RagStepMetrics }
   | { t: 'text'; c: string }
-  | { t: 'cite'; id: string; title: string; source: string; snippet: string; page?: number; doc_id?: string; relevance?: number }
+  | { t: 'cite'; citations: CitationFrame[] }
   | { t: 'done'; conversation_id: string; message_id: string }
   | { t: 'error'; message: string }
+  | { t: 'heartbeat' }
 
