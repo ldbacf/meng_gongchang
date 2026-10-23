@@ -9,6 +9,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 const props = defineProps<{
   url: string
   title?: string
+  /** 附加请求头（如 Authorization）——pdf.js 的 Range 请求也要带上鉴权 */
+  headers?: Record<string, string>
 }>()
 
 const loading = ref(false)
@@ -20,8 +22,18 @@ const canvasRefs = new Map<number, HTMLCanvasElement>()
 
 let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null
 
-// ── Load PDF as binary, then render ──
+// ── Load PDF by range requests, then render ──
 
+/**
+ * 优先让 pdf.js 自己按 Range 分片拉取（后端 /pdf/stream 支持 206）：
+ * 先拿前若干字节解析目录，**首页立即可渲染**，后续按需拉取。
+ *
+ * 为什么不先 fetch 整份再喂 data：实测后端→容器这条链路约 250 KB/s，
+ * 一份 2MB 的 PDF 要 8s 才到齐，整份缓冲期间 UI 一直停在"加载 PDF..."。
+ * 分片后首页通常 <1s 出现。
+ *
+ * 失败（例如 Range 不被支持）则回退到整份下载，保证可用性。
+ */
 async function loadPdf() {
   loading.value = true
   error.value = ''
@@ -31,13 +43,7 @@ async function loadPdf() {
   pageCount.value = 0
 
   try {
-    const response = await fetch(props.url)
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const arrayBuffer = await response.arrayBuffer()
-    const uint8Array = new Uint8Array(arrayBuffer)
-
-    const loadingTask = pdfjsLib.getDocument({ data: uint8Array })
-    pdfDoc = await loadingTask.promise
+    pdfDoc = await _openByUrl()
     pageCount.value = pdfDoc.numPages
 
     canvasWraps.value = Array.from({ length: pdfDoc.numPages }, (_, i) => ({
@@ -51,6 +57,28 @@ async function loadPdf() {
     console.error('PDF load error:', e)
     error.value = 'PDF 加载失败，请检查文件是否有效'
     loading.value = false
+  }
+}
+
+/** 走 Range 分片；不行再退回整份缓冲。 */
+async function _openByUrl(): Promise<pdfjsLib.PDFDocumentProxy> {
+  try {
+    const task = pdfjsLib.getDocument({
+      url: props.url,
+      httpHeaders: props.headers,
+      // 分片大小：单请求 128KB 在该链路上约 0.5s，兼顾首屏与请求数
+      rangeChunkSize: 128 * 1024,
+      disableAutoFetch: true,
+      disableStream: false,
+    })
+    return await task.promise
+  } catch (e) {
+    console.warn('PDF 分片加载失败，回退整份下载:', e)
+    const response = await fetch(props.url, { headers: props.headers })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const arrayBuffer = await response.arrayBuffer()
+    const task = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) })
+    return await task.promise
   }
 }
 

@@ -7,7 +7,6 @@ import type { Citation } from '@/types'
 import { useSSE } from '@/composables/useSSE'
 import { useToastStore } from '@/stores/toast'
 import { useAdminStore } from '@/stores/admin'
-import api from '@/api'
 import ChatInput from './ChatInput.vue'
 import MessageBubble from './MessageBubble.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -70,32 +69,30 @@ function _setPdfUrl(url: string | null) {
   pdfUrl.value = url
 }
 
+/** pdf.js 走 Range 请求时的附加头（接口需 Bearer 鉴权）。 */
+const pdfHeaders = computed<Record<string, string>>(() => {
+  const token = localStorage.getItem('access_token')
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  return headers
+})
+
 async function loadPdfForCitation(citation: Citation) {
   activeCitation.value = citation
   rightPanelOpen.value = true
-  pdfLoading.value = true
   _setPdfUrl(null)
 
-  try {
-    if (citation.doc_id) {
-      // 用带 token 的 api 实例请求 PDF 流，转为 blob URL 供 PdfViewer 渲染
-      const response = await api.get(`/v1/documents/${citation.doc_id}/pdf/stream`, {
-        responseType: 'blob',
-      })
-      const blob = new Blob([response.data], { type: 'application/pdf' })
-      const blobUrl = URL.createObjectURL(blob)
-      _currentBlobUrl = blobUrl
-      pdfUrl.value = blobUrl
-      pdfLoading.value = false
-      return
-    } else if (citation.pdfUrl) {
-      _setPdfUrl(citation.pdfUrl)
-    }
-  } catch {
-    _setPdfUrl(citation.pdfUrl ?? null)
-  } finally {
+  // 直接把接口 URL 交给 PdfViewer / pdf.js，由它按 Range 分片拉取。
+  // 曾先 axios 拿整份 blob 再渲染：2MB 要等约 8s 才出第一页（链路约 250 KB/s）。
+  if (citation.doc_id) {
     pdfLoading.value = false
+    _setPdfUrl(`/api/v1/documents/${citation.doc_id}/pdf/stream`)
+    return
   }
+
+  pdfLoading.value = true
+  _setPdfUrl(citation.pdfUrl ?? null)
+  pdfLoading.value = false
 }
 
 async function handleCitationClick(citation: Citation) {
@@ -317,6 +314,7 @@ async function handleSend(content: string) {
       :pdf-url="pdfUrl"
       :pdf-loading="pdfLoading"
       :show-back-button="showBackButton"
+      :pdf-headers="pdfHeaders"
       @close="closeRightPanel"
       @back-to-list="goBackToList"
       @select-citation="handlePanelSelectCitation"

@@ -293,7 +293,7 @@ async def get_document_by_md5(
         return task
 
 
-@router.get("/{doc_id}/pdf/stream")
+@router.api_route("/{doc_id}/pdf/stream", methods=["GET", "HEAD"])
 async def stream_document_pdf(
     doc_id: str,
     request: Request,
@@ -303,6 +303,10 @@ async def stream_document_pdf(
 
     从 MinIO 读取 PDF 直接流式返回（不再暴露 presigned URL）。`Range: bytes=x-y`
     → `206 Partial Content` + `Content-Range`；越界 → 416；无 Range → 200 全量。
+
+    **同时支持 HEAD**：pdf.js 会先用 HEAD 探测 `Content-Length` 与 `Accept-Ranges`，
+    再决定是否分片拉取。只声明 GET 时 HEAD 会 405，pdf.js 就退回"整份下载"，
+    分片加载失效（前端表现为要等整份 PDF 到齐才开始渲染）。
     """
     bucket = get_settings().minio_raw_bucket
     client = get_container().get_minio().client
@@ -328,14 +332,21 @@ async def stream_document_pdf(
         return Response(status_code=416, headers=range_headers)
     status_code = range_status
     headers.update(range_headers)
+    # 长度在 HEAD 与 206 两种情况下都要显式给出（pdf.js 据此分片）
+    headers["Content-Length"] = str(length)
+
+    if request.method == "HEAD":
+        # 只回头，不读 MinIO、不建流；content-type 也要给（pdf.js 会校验）
+        return Response(
+            status_code=status_code,
+            headers=headers,
+            media_type="application/pdf",
+        )
 
     try:
         response = client.get_object(bucket, object_path, offset=offset, length=length)
     except Exception as e:
         raise HTTPException(502, f"读取 PDF 失败: {e}")
-
-    if status_code == 206:
-        headers["Content-Length"] = str(length)
 
     return StreamingResponse(
         response.stream(amt=65536),
