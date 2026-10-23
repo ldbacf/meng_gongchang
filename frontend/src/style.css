@@ -193,6 +193,19 @@
   box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
 }
 
+/*
+ * 流式输出期间关掉 .citation-tag 的过渡。
+ *
+ * 原因：正文用 v-html 渲染整段 markdown，而流式每 ~100ms 就重算一次 → innerHTML 整体替换
+ * → 每个 .citation-tag 都是新 DOM 节点，:hover 状态随之丢失。此时若还开着
+ * `transition: all 0.15s`，每次重建都会从默认浅蓝重新过渡，动画永远走不完 → 闪烁。
+ * 直接落终态（无过渡）后视觉稳定；流式结束后恢复正常过渡。
+ */
+.is-streaming .citation-tag,
+.is-streaming .citation-tag:hover {
+  transition: none;
+}
+
 /* ── Message bubble enter ── */
 .msg-enter-active {
   transition: opacity 0.3s ease, transform 0.3s ease;

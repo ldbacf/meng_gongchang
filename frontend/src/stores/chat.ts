@@ -187,15 +187,19 @@ export const useChatStore = defineStore('chat', () => {
         appendStreamContent(msg.c)
         break
       case 'cite':
-        addStreamCitation({
-          id: msg.id,
-          title: msg.title,
-          source: msg.source,
-          snippet: msg.snippet,
-          page: msg.page,
-          doc_id: msg.doc_id,
-          relevance: msg.relevance,
-        })
+        // 后端一次发整组（{t:'cite', citations:[...]}），不是一条一帧。
+        // 曾按单对象读 msg.id/msg.title → 推入一条全 undefined 的引用：
+        // 「参考文献 · 1」且 citation.doc_id 为空 → 点开 PDF 无反应。
+        for (const c of msg.citations ?? []) {
+          addStreamCitation({
+            id: String(c.idx),
+            title: c.title ?? '',
+            source: c.source ?? '',
+            snippet: c.snippet ?? '',
+            doc_id: c.doc_id ?? undefined,
+            relevance: c.relevance ?? 0,
+          })
+        }
         break
       case 'done':
         finishStreaming(msg.message_id, { ...streamRagSteps.value })
@@ -214,10 +218,13 @@ export const useChatStore = defineStore('chat', () => {
 
   function _startReveal() {
     _stopReveal()
+    // 100ms/步、每步 6 字：观感与 50ms/3 字接近，但整段 markdown 的重解析次数减半。
+    // 每次 tick 都会让 AiMessage 的 renderedContent 重算 → md.render() 全文重解析 →
+    // v-html 整体替换 innerHTML，代价不低（详见 AiMessage.vue 注释）。
     _revealTimer = setInterval(() => {
       if (displayedLength.value < streamContent.value.length) {
         displayedLength.value = Math.min(
-          displayedLength.value + 3,
+          displayedLength.value + 6,
           streamContent.value.length,
         )
       }
@@ -225,7 +232,7 @@ export const useChatStore = defineStore('chat', () => {
         _stopReveal()
         _finalizeStream()
       }
-    }, 50)
+    }, 100)
   }
 
   function _stopReveal() {

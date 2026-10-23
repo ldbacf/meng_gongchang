@@ -58,24 +58,39 @@ describe('chat store — SSE 帧处理', () => {
     s.stopReveal()
   })
 
-  it('text 帧累加内容，cite 帧收集引用', () => {
+  it('text 帧累加内容，cite 帧（数组）整组收集引用', () => {
     const s = useChatStore()
     s.startStreaming()
 
     s.handleStreamMsg({ t: 'text', c: '高血压' } as never)
     s.handleStreamMsg({ t: 'text', c: '初始治疗' } as never)
+    // 后端一次发整组：{t:'cite', citations:[...]}，不是一条一帧
     s.handleStreamMsg({
       t: 'cite',
-      id: '1',
-      title: '指南',
-      source: '中国全科医学',
-      snippet: '片段',
-      doc_id: '8285',
+      citations: [
+        { idx: '1', doc_id: '8060', title: '指南A', source: '中国全科医学', snippet: '片段A', relevance: 0.96 },
+        { idx: '2', doc_id: '7611', title: '指南B', source: '中国全科医学', snippet: '片段B', relevance: 0.95 },
+      ],
     } as never)
 
     expect(s.streamContent).toBe('高血压初始治疗')
-    expect(s.streamCitations).toHaveLength(1)
-    expect(s.streamCitations[0].doc_id).toBe('8285')
+    expect(s.streamCitations).toHaveLength(2)
+    expect(s.streamCitations[0].id).toBe('1')
+    expect(s.streamCitations[0].doc_id).toBe('8060')
+    expect(s.streamCitations[1].doc_id).toBe('7611')
+    // source 也要落进引用，否则「参考文献」列表里的期刊徽章是空白
+    expect(s.streamCitations[0].source).toBe('中国全科医学')
+
+    s.stopReveal()
+  })
+
+  it('cite 帧字段缺失时不产生"空引用"（回归：曾推入一条全 undefined 的引用）', () => {
+    const s = useChatStore()
+    s.startStreaming()
+
+    // 空数组：不应产生任何引用（旧实现会 push 一条 undefined 引用 → 参考文献·1）
+    s.handleStreamMsg({ t: 'cite', citations: [] } as never)
+    expect(s.streamCitations).toHaveLength(0)
 
     s.stopReveal()
   })
