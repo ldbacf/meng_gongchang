@@ -55,7 +55,7 @@ def scan_pairs(data_dir: Path) -> list[dict]:
 
 async def _dedup_filter(pairs: list[dict]) -> list[dict]:
     """MD5 查重 + 上传 raw/meta 到 MinIO + 建/重置 DocumentTask（提交前的前置）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     container = get_container()
     sessionmaker = container.get_db_sessionmaker()
@@ -114,7 +114,7 @@ async def _dedup_filter(pairs: list[dict]) -> list[dict]:
 
 async def _submit(files: list[dict]) -> None:
     """统一经 SubmissionService（token 分组/分批/reserve-commit-refund/enqueue 全在里面）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     svc = get_container().get_submission_service()
     results = await svc.submit(files)
@@ -138,7 +138,7 @@ async def _main() -> None:
     log.info("文件夹扫描提交器 启动")
     log.info("数据目录: %s", data_dir)
 
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     await get_container().get_minio().init_buckets()
 

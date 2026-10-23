@@ -23,13 +23,20 @@ def _assert_absent(rel: str, names: list[str]):
 
 
 def test_pre_signed_pdf_endpoint_removed():
-    """预签名 PDF 端点 + 三套回退 helper 已删除（仅保留 /pdf/stream 代理流单路径）。"""
-    _assert_absent(
-        "app/main.py",
-        ["get_document_pdf", "_try_document_task_pdf", "_try_minio_direct", "_build_pdf_response"],
-    )
-    assert "/documents/{doc_id}/pdf/stream" in _read("app/main.py")
-    assert '"/documents/{doc_id}/pdf"' not in _read("app/main.py").replace("pdf/stream", "")
+    """预签名 PDF 端点 + 三套回退 helper 已删除（仅保留 /pdf/stream 代理流单路径）。
+
+    端点已从 `main.py` 拆到 `interface/routers/documents.py`（router 内路径为
+    `/{doc_id}/pdf/stream`，加 prefix 后即 `/api/v1/documents/{doc_id}/pdf/stream`）。
+    """
+    for rel in ("app/main.py", "app/interface/routers/documents.py"):
+        _assert_absent(
+            rel,
+            ["get_document_pdf", "_try_document_task_pdf", "_try_minio_direct", "_build_pdf_response"],
+        )
+    docs = _read("app/interface/routers/documents.py")
+    assert '"/{doc_id}/pdf/stream"' in docs
+    # 旧的预签名端点 /pdf 不应再出现（排除 pdf/stream 后的残留）
+    assert '"/{doc_id}/pdf"' not in docs.replace("/pdf/stream", "")
 
 
 def test_process_document_removed():
@@ -48,12 +55,41 @@ def test_llm_answer_uses_container():
 
 
 def test_fetch_l0_meta_uses_kb_es_index():
-    """fetch_l0_meta 不再硬编码 index='chunks'，改由调用方线程 es_index（QaState.kb.es_index）。"""
-    text = _read("app/application/graphs/rag/nodes/_common.py")
-    assert 'es_index or "chunks"' in text
-    assert 'index="chunks"' not in text
+    """fetch_l0_meta 不硬编码 index='chunks'，由调用方线程 es_index（QaState.kb.es_index）。
+
+    实现已从 `_common.py` 下移到 `adapters/ports_impl.SearchAdapter.fetch_l0_meta`
+    （节点只依赖 RetrievalPort）。这里断言**行为**而非字符串：传 es_index 时必须用它，
+    且不得出现写死的 `index="chunks"`。
+    """
+    import app.infrastructure.search as search_mod
+    from app.infrastructure.adapters.ports_impl import get_search_adapter
+
+    captured = {}
+
+    class _FakeES:
+        def search(self, index, body):
+            captured["index"] = index
+            return {"hits": {"hits": []}}
+
+    orig = search_mod.get_es_client
+    search_mod.get_es_client = lambda: _FakeES()
+    try:
+        class _Hit:
+            doc_id = "d1"
+            title_cn = ""
+
+        get_search_adapter().fetch_l0_meta([_Hit()], es_index="kb_custom")
+        assert captured["index"] == "kb_custom"
+    finally:
+        search_mod.get_es_client = orig
+
+    # 兜底不得是硬编码 "chunks" 字面量，而是 settings 里的 es_index
+    src = _read("app/infrastructure/adapters/ports_impl.py")
+    assert 'index="chunks"' not in src
+    assert "es_index or get_settings().es_index" in src
+
     cite_text = _read("app/application/graphs/rag/nodes/cite.py")
-    assert "fetch_l0_meta(reranked, es_index=kb.get(\"es_index\"))" in cite_text
+    assert 'fetch_l0_meta(reranked, es_index=kb.get("es_index"))' in cite_text
 
 
 def test_main_has_no_dead_imports():

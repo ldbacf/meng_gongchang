@@ -42,7 +42,7 @@ def analyze_intent(
     返回:
         IntentResult，失败时返回原 query 直通的默认结果
     """
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     s = get_settings()
     if not s.deepseek_api_key or s.deepseek_api_key.startswith("your-"):

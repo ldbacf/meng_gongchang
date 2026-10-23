@@ -3,8 +3,13 @@
 - lazy getter：客户端首次访问才创建（可注入 fake，测试替换真实客户端）。
 - `start()` / `close()` 幂等；close 统一 dispose（engine / redis pool / milvus / bge-m3 /
   LLM / event_bus），close 后置空可重建。
-- 生产用 `get_container()`（deps.py）单例；测试用 `AppContainer(fakes={...})` 或
+- 生产用本模块的 `get_container()` 单例；测试用 `AppContainer(fakes={...})` 或
   `set_container(...)` 注入 fake。
+
+**为什么单例放在这里（而不是 interface 层）**：容器是各层共用的**装配根**，
+application / infrastructure 都要取它。放在 `interface/deps.py` 会让这两个层反向
+import interface——分层被打穿，且只能用函数内 import 规避循环。
+`interface/deps.py` 现在只做 re-export 保持既有导入路径可用。
 """
 from __future__ import annotations
 
@@ -488,3 +493,24 @@ class AppContainer:
         self._metrics = None
         self._started = False
         self._closed = True
+
+
+# ── 进程级单例 ────────────────────────────────────────────────
+# 放在基础设施层：容器是各层共用的装配根，任何层取它都不应构成跨层反向依赖。
+
+_container: AppContainer | None = None
+
+
+def get_container() -> AppContainer:
+    """获取进程级 DI 容器单例（lazy 创建，无客户端实例化副作用）。"""
+    global _container
+    if _container is None:
+        _container = AppContainer()
+    return _container
+
+
+def set_container(container: AppContainer | None) -> None:
+    """测试专用：替换进程级容器单例（传 None 重置为惰性重建）。"""
+    global _container
+    _container = container
+

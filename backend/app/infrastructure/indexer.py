@@ -9,7 +9,7 @@ from app.infrastructure.es.es_mappings import ES_SETTINGS, build_generic_kb_mapp
 
 def read_parsed_markdown(md5: str) -> str:
     """从 MinIO parsed-data/{md5}/ 读取 full.md（经容器 MinIO 适配器）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     return get_container().get_minio().read_parsed_markdown(md5)
 
@@ -19,7 +19,7 @@ def es_bulk_write(
     chunks: list[dict],
 ) -> int:
     """写入 ES 指定索引，不存在自动创建（在线自动建与 init_es 同源 mapping）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     es = get_container().get_es().client
 
@@ -48,7 +48,7 @@ def es_bulk_write(
 
 def milvus_insert(collection_name: str, chunks: list[dict]) -> int:
     """写入 Milvus 指定 collection（不存在自动创建，按 chunk_id 幂等 upsert）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     mv = get_container().get_milvus()
     col = mv.ensure_collection(collection_name)

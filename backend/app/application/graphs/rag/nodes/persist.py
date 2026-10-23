@@ -13,7 +13,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy import select
 
 from app.application.graphs.rag.nodes._emit import emit_done
-from app.interface.deps import get_container
+from app.infrastructure.container import get_container
 from app.infrastructure.db.models import Conversation, Message
 
 

@@ -8,12 +8,12 @@ from __future__ import annotations
 
 
 def _container_engine():
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
     return get_container().get_db_engine()
 
 
 def _container_sessionmaker():
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
     return get_container().get_db_sessionmaker()
 
 

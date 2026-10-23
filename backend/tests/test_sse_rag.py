@@ -18,7 +18,7 @@ from app.domain.rag.intent import IntentResult
 from app.domain.retrieval.search_hit import SearchHit
 from app.infrastructure.container import AppContainer
 from app.interface.deps import set_container
-from app.interface.sse import (
+from app.domain.sse import (
     frame_cite,
     frame_done,
     frame_error,

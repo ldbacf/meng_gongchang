@@ -4,7 +4,7 @@ read_markdown → chunk_document(domain 唯一入口) → embed_batch → es_wri
 
 - 每个节点末尾显式投影写 DB（pipeline_steps/status）——图是唯一写入方，
   "图状态与 DB 双写一致" = at-least-once 收敛（副作用幂等，Milvus 先删后插 / ES _id 覆盖）。
-- 节点级 `retry_policy`（显式 retry_on MineruTransientError，C4）；Fatal 短路。
+- 节点级 `retry_policy`（显式 retry_on TransientError 端口契约，C4）；Fatal 短路。
 - 子图内**禁用 interrupt**（手动 ainvoke 的子图 interrupt 会冒泡成畸形父状态）。
 """
 from __future__ import annotations
@@ -25,9 +25,7 @@ from app.application.graphs.nodes._task import (
 )
 from app.application.graphs.state import IndexDocState
 from app.domain.knowledge_base import resolve_kb_kind
-from app.infrastructure.adapters.embedding_http import EmbeddingServiceError
-from app.infrastructure.adapters.mineru import MineruTransientError
-from app.infrastructure.indexer import es_bulk_write
+from app.domain.ports.exceptions import TransientError
 
 
 async def load_context(state: IndexDocState) -> dict:
@@ -42,7 +40,7 @@ async def load_context(state: IndexDocState) -> dict:
     await ensure_parsed(state["md5"])
     await mark_indexing(state["md5"])
     await update_steps(state["md5"], "chunking", "running")
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     kb = None
     if task.kb_id:
@@ -64,7 +62,7 @@ async def load_context(state: IndexDocState) -> dict:
 
 
 async def read_markdown(state: IndexDocState) -> dict:
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     full_md = get_container().get_minio().read_parsed_markdown(state["md5"])
     return {"parsed_full_md": full_md}
@@ -82,7 +80,7 @@ async def chunk_document_node(state: IndexDocState) -> dict:
 
 
 async def embed_batch(state: IndexDocState) -> dict:
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     model = get_container().get_embedder()
     # bge-m3 推理（local）/ HTTP 请求（remote）均为同步阻塞，移出 event loop。
@@ -96,13 +94,15 @@ async def embed_batch(state: IndexDocState) -> dict:
 
 async def es_write(state: IndexDocState) -> dict:
     es_index = state["es_index"]
-    written = es_bulk_write(es_index, state["chunks"])
+    from app.infrastructure.adapters.ports_impl import get_index_write_adapter
+
+    written = get_index_write_adapter().es_bulk_write(es_index, state["chunks"])
     await update_steps(state["md5"], "es_write", "done", target_index=es_index, count=written)
     return {"es_written": written}
 
 
 async def milvus_write(state: IndexDocState) -> dict:
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     mv = get_container().get_milvus()
     collection = mv.ensure_collection(state["milvus_collection"])
@@ -118,16 +118,16 @@ async def milvus_write(state: IndexDocState) -> dict:
         target_collection=state["milvus_collection"], count=written,
     )
     await mark_ready(state["md5"])  # INDEXING→READY
-    from app.infrastructure.ws_manager import broadcast_doc_update
+    from app.infrastructure.adapters.ports_impl import get_document_event_adapter
 
     task = await load_task(state["md5"])
     if task:
-        await broadcast_doc_update(task)
+        await get_document_event_adapter().broadcast_doc_update(task)
     return {"milvus_written": written}
 
 
 _TRANSIENT = RetryPolicy(
-    retry_on=lambda e: isinstance(e, (MineruTransientError, EmbeddingServiceError)),
+    retry_on=lambda e: isinstance(e, TransientError),
     max_attempts=3,
 )
 

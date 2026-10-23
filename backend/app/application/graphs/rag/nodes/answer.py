@@ -17,7 +17,9 @@ from app.domain.knowledge_base import KBKind
 
 
 async def answer(state: dict) -> dict:
-    from app.infrastructure.adapters.llm_answer import answer_stream_async, build_answer_prompt
+    from app.infrastructure.adapters.ports_impl import get_generation_adapter
+
+    gen = get_generation_adapter()
 
     query = state["query"]
     reranked = state.get("reranked") or []
@@ -35,9 +37,9 @@ async def answer(state: dict) -> dict:
     else:
         from app.infrastructure.observability.instrument import tracked_span
 
-        from app.interface.deps import get_container
+        from app.infrastructure.container import get_container
 
-        user_prompt = build_answer_prompt(query, reranked, history, top_n=5)
+        user_prompt = gen.build_prompt(query, reranked, history, top_n=5)
         # 单次流式；失败上抛（服务层 error_handler 产 t:error + 落库 failed）
         m = get_container().get_metrics()
         with tracked_span(
@@ -45,7 +47,7 @@ async def answer(state: dict) -> dict:
             latency_metric=m.llm_latency,
             error_metric=m.llm_error_total,
         ):
-            async for tok in answer_stream_async(user_prompt, kb_kind):
+            async for tok in gen.stream(user_prompt, kb_kind):
                 full.append(tok)
                 await emit_text(tok)
 

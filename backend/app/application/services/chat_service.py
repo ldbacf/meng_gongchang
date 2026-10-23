@@ -29,7 +29,7 @@ from sqlalchemy import select
 
 from app.application.checkpoint_registry import config_for, thread_id_for_rag
 from app.infrastructure.observability.tracing import get_tracer
-from app.interface.sse import (
+from app.domain.sse import (
     frame_done,
     frame_error,
     frame_heartbeat,

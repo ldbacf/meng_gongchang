@@ -23,13 +23,13 @@ from app.domain.retrieval.search_hit import SearchHit  # noqa: F401
 
 def get_es_client():
     """获取 ES 客户端（容器管理生命周期）。替代旧 `_get_es`。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
     return get_container().get_es().client
 
 
 def connect_milvus():
     """连接 Milvus（容器管理生命周期）。替代旧 `_connect_milvus`。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
     get_container().get_milvus().connect()
 
 
@@ -39,7 +39,7 @@ def _get_embed_model():
     remote 模式为 HttpEmbeddingPort（HTTP 调独立服务），local 为 EmbeddingFactory
     （进程内加载）；两者皆实现 embed_query/embed_documents，调用方签名不变。
     """
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
     return get_container().get_embedder()
 
 
@@ -123,7 +123,7 @@ def _milvus_search(
     top_k: int = 200,
     milvus_collection: str | None = None,
 ) -> list[SearchHit]:
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     mv = get_container().get_milvus()
     mv.connect()
@@ -184,7 +184,7 @@ def recall_dual(
     """
     from app.infrastructure.observability.instrument import tracked_span
 
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     with tracked_span(
         "retrieval.dual", latency_metric=get_container().get_metrics().retrieval_latency, backend="dual",
@@ -248,7 +248,7 @@ def rerank(
 
     from langchain_core.documents import Document
 
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     n = top_n if top_n else len(with_content)
     reranker = get_container().get_reranker(top_n=n)

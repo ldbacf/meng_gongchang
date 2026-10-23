@@ -5,14 +5,17 @@
 search）无需感知 remote/local。
 
 网络 / 5xx 统一包装为 `EmbeddingServiceError`（可重试语义，供图节点 retry_policy
-捕获，类比 MineruTransientError）。客户端无连接池，每次调用短连接（内网 ms 级）。
+捕获，类比 MineruTransientError）。该类继承 `domain.ports.exceptions.TransientError`，
+应用层据此判断重试，无需 import 本模块。客户端无连接池，每次调用短连接（内网 ms 级）。
 """
 from __future__ import annotations
 
 import httpx
 
+from app.domain.ports.exceptions import TransientError as _TransientError
 
-class EmbeddingServiceError(RuntimeError):
+
+class EmbeddingServiceError(_TransientError, RuntimeError):
     """embedding-service 调用失败（网络 / 5xx / 解析错误），可重试。"""
 
 

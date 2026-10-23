@@ -10,7 +10,7 @@ from __future__ import annotations
 from argparse import ArgumentParser
 
 from app.infrastructure.settings import get_settings
-from app.interface.deps import get_container
+from app.infrastructure.container import get_container
 
 
 def list_folders(bucket: str) -> None:

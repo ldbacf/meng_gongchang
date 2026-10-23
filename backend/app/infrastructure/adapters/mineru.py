@@ -3,6 +3,10 @@
 结构化异常（替代 worker 字符串匹配）：
 - `MineruFatalError`：不可恢复（batch 不存在 / 无权限 / token 失效 / 上传失败）。
 - `MineruTransientError`：可重试（网络错误 / 429 重试耗尽 / 5xx）。
+
+两个类**继承自 `domain.ports.exceptions`** 的 `FatalError` / `TransientError`：
+应用层的 `retry_policy` 只按端口契约判断是否重试，不需要 import 本适配器模块。
+本模块保留同名导出，既有 `from ...adapters.mineru import MineruFatalError` 仍可用。
 """
 from __future__ import annotations
 
@@ -12,6 +16,8 @@ import traceback
 
 import httpx
 
+from app.domain.ports.exceptions import FatalError as _FatalError
+from app.domain.ports.exceptions import TransientError as _TransientError
 from app.infrastructure.settings import Settings, get_settings
 
 logger = logging.getLogger("mineru")
@@ -25,11 +31,11 @@ MAX_RETRIES = 3
 _FATAL_KEYWORDS = ("找不到任务", "没有权限", "Token 错误", "Token 过期")
 
 
-class MineruFatalError(RuntimeError):
+class MineruFatalError(_FatalError, RuntimeError):
     """MinerU 不可恢复错误 — 直接标记失败，不重试。"""
 
 
-class MineruTransientError(RuntimeError):
+class MineruTransientError(_TransientError, RuntimeError):
     """MinerU 可重试错误 — 429/网络/5xx。"""
 
 
@@ -177,7 +183,7 @@ class MineruClient:
     async def poll_batch(self, batch_id: str, token: str) -> list[dict]:
         """使用指定 token 轮询批量任务结果"""
         from app.infrastructure.observability.instrument import tracked_span
-        from app.interface.deps import get_container
+        from app.infrastructure.container import get_container
 
         m = get_container().get_metrics()
         with tracked_span("mineru.poll", latency_metric=m.mineru_latency, error_metric=m.mineru_error_total):
@@ -186,7 +192,7 @@ class MineruClient:
 
     async def download_result(self, download_url: str) -> bytes:
         from app.infrastructure.observability.instrument import tracked_span
-        from app.interface.deps import get_container
+        from app.infrastructure.container import get_container
 
         m = get_container().get_metrics()
         with tracked_span("mineru.download", latency_metric=m.mineru_latency, error_metric=m.mineru_error_total):

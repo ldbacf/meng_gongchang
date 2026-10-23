@@ -22,7 +22,7 @@ import argparse
 import asyncio
 import re
 
-from app.interface.deps import get_container
+from app.infrastructure.container import get_container
 
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 

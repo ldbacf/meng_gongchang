@@ -1,7 +1,10 @@
 """接口层共享 FastAPI 依赖。
 
-- `get_container()`：进程级 AppContainer 单例（lazy 创建，无客户端实例化副作用）。
-- `set_container()`：测试替换容器（注入 fake 客户端）。
+- `get_container()` / `set_container()`：**从 infrastructure 层 re-export**。
+  容器是各层共用的装配根，单例定义在 `app/infrastructure/container.py`——放在这里会让
+  application / infrastructure 反向 import interface，分层被打穿。此处的 re-export 只为
+  让接口层内部与既有测试保持 `from app.interface.deps import get_container` 可用；
+  **新代码请直接从 `app.infrastructure.container` 导入**。
 - `require_kb_access()`：KB 作用域授权依赖——校验 KB 存在（不存在→404）；
   查询对所有登录用户开放（未引入 KB 归属模型）；写操作（上传/建库）由 `require_admin` 把关。
 """
@@ -17,23 +20,12 @@ from app.interface.security import get_current_user
 from app.infrastructure.db.session import get_db
 from app.infrastructure.db.models import KnowledgeBase, User
 
-from app.infrastructure.container import AppContainer
-
-_container: AppContainer | None = None
-
-
-def get_container() -> AppContainer:
-    """获取进程级 DI 容器单例。"""
-    global _container
-    if _container is None:
-        _container = AppContainer()
-    return _container
-
-
-def set_container(container: AppContainer | None) -> None:
-    """测试专用：替换进程级容器单例（传 None 重置为惰性重建）。"""
-    global _container
-    _container = container
+# re-export：容器单例真源在 infrastructure 层（理由见模块 docstring）
+from app.infrastructure.container import (  # noqa: F401
+    AppContainer,
+    get_container,
+    set_container,
+)
 
 
 async def require_kb_access(

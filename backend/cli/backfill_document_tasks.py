@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from app.domain.knowledge_base import KBKind
 from app.infrastructure.settings import get_settings
-from app.interface.deps import get_container
+from app.infrastructure.container import get_container
 from app.infrastructure.db.models import DocumentTask, KnowledgeBase, TaskStatus, default_pipeline_steps
 
 

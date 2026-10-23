@@ -14,7 +14,7 @@ from app.infrastructure.db.models import DocumentTask, TaskStatus
 
 
 async def load_task(md5: str) -> DocumentTask | None:
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     async with get_container().get_db_sessionmaker()() as session:
         r = await session.execute(select(DocumentTask).where(DocumentTask.md5 == md5))
@@ -26,7 +26,7 @@ async def update_steps(md5: str, step: str, status: str, **kwargs) -> None:
 
     注意：JSONB 列**就地修改不触发脏跟踪**，必须重新赋值（dict(steps) → 赋回）。
     """
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     async with get_container().get_db_sessionmaker()() as session:
         r = await session.execute(select(DocumentTask).where(DocumentTask.md5 == md5))
@@ -40,7 +40,7 @@ async def update_steps(md5: str, step: str, status: str, **kwargs) -> None:
 
 async def ensure_parsed(md5: str) -> DocumentTask | None:
     """重跑/resume 场景补跳：PENDING→PROCESSING→PARSED（合法迁移链）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     async with get_container().get_db_sessionmaker()() as session:
         r = await session.execute(select(DocumentTask).where(DocumentTask.md5 == md5))
@@ -57,7 +57,7 @@ async def ensure_parsed(md5: str) -> DocumentTask | None:
 
 async def mark_indexing(md5: str) -> DocumentTask | None:
     """PARSED→INDEXING（索引开始）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     async with get_container().get_db_sessionmaker()() as session:
         r = await session.execute(select(DocumentTask).where(DocumentTask.md5 == md5))
@@ -70,7 +70,7 @@ async def mark_indexing(md5: str) -> DocumentTask | None:
 
 async def mark_ready(md5: str) -> None:
     """INDEXING→READY（索引完成）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     async with get_container().get_db_sessionmaker()() as session:
         r = await session.execute(select(DocumentTask).where(DocumentTask.md5 == md5))
@@ -82,7 +82,7 @@ async def mark_ready(md5: str) -> None:
 
 async def mark_failed(md5: str, error: str) -> None:
     """→FAILED（任意阶段失败，迁移表允许）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     async with get_container().get_db_sessionmaker()() as session:
         r = await session.execute(select(DocumentTask).where(DocumentTask.md5 == md5))

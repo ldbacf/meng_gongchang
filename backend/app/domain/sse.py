@@ -3,6 +3,10 @@
 每帧带版本信封 `{"v":1, ...}`（向后兼容旧前端 useSSE，旧字段保留）。
 帧类型：step / text / cite / done / error / heartbeat。
 metrics 由 `app/application/rag/rag_metrics.build_rag_step` 单工厂产出（S-4.6）。
+
+**为何在 domain 层**：帧结构是前后端之间的**协议契约**，只做 dict 构造 + json 序列化，
+零第三方依赖。原先放在 interface 层时，application 层的 ChatService 为了产帧不得不
+反向 import interface——协议下沉后这条反向依赖消失。
 """
 from __future__ import annotations
 

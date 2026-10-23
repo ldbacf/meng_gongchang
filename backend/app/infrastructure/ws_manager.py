@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from collections import defaultdict
 
 from fastapi import WebSocket
@@ -100,8 +101,40 @@ class WSRegistry:
 
 def get_ws_registry():
     """经 AppContainer 获取 WSRegistry（容器单例）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
     return get_container().get_ws_registry()
+
+
+# doc_update 事件的字段集（WS 线上契约）。
+# 曾经直接 `from app.interface.schemas import DocumentResponse` 复用 HTTP schema，
+# 那让基础设施层反向依赖接口层。这里改为本地序列化，字段一致性由
+# tests/test_ws_payload.py 断言（与 DocumentResponse 的字段集逐一比对），避免漂移。
+_DOC_UPDATE_FIELDS = (
+    "id",
+    "original_name",
+    "md5",
+    "status",
+    "kb_id",
+    "pipeline_steps",
+    "created_at",
+    "error_msg",
+)
+
+
+def _serialize_doc(task) -> dict:
+    """DocumentTask → doc_update 事件的 JSON 友好 dict。"""
+    out: dict = {}
+    for f in _DOC_UPDATE_FIELDS:
+        v = getattr(task, f, None)
+        if f == "status":
+            # TaskStatus(str, Enum) → 纯字符串
+            v = getattr(v, "value", v)
+        elif hasattr(v, "isoformat"):
+            v = v.isoformat()
+        elif isinstance(v, uuid.UUID):
+            v = str(v)
+        out[f] = v
+    return out
 
 
 async def broadcast_doc_update(task, kb_id=None):
@@ -109,10 +142,8 @@ async def broadcast_doc_update(task, kb_id=None):
     kid = kb_id or getattr(task, "kb_id", None)
     if not kid:
         return
-    from app.interface.schemas import DocumentResponse
-
     try:
-        doc_data = DocumentResponse.model_validate(task).model_dump(mode="json")
+        doc_data = _serialize_doc(task)
     except Exception:
         return
     await get_ws_registry().broadcast(str(kid), {"type": "doc_update", "doc": doc_data})

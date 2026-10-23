@@ -328,7 +328,7 @@ async def upload_document(
     existing = existing_result.scalar_one_or_none()
     if existing:
         if existing.kb_id != kb_id:
-            from app.main import _copy_across_kb
+            from app.interface.routers.documents import _copy_across_kb
 
             resp, _fi = await _copy_across_kb(
                 existing, file_md5, file.filename or "unknown", content, kb_id, db,

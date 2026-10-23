@@ -23,7 +23,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.domain.knowledge_base import KBKind
 from app.domain.rag.prompts import CONTEXT_TEMPLATE, GENERIC_SYSTEM_PROMPT, SYSTEM_PROMPT
 from app.infrastructure.settings import get_settings
-from app.interface.deps import get_container
+from app.infrastructure.container import get_container
 
 logger = logging.getLogger("llm_answer")
 

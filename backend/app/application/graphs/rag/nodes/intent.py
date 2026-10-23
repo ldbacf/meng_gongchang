@@ -3,6 +3,9 @@
 - `analyze_intent(query, last_context, kb_kind)`：Medical/Generic 策略（domain 纯函数）。
 - 失败 → 降级（`degraded=True`），`rewritten_query` 回退原 query（A-4.5，不中断）。
 - `USE_QUERY_EXPANSION=true` 时再经 `expand_query` 追加专业术语（条件节点，折叠于此）。
+
+意图 / 扩展经 `domain.ports.generation`（adapters.ports_impl 实现），
+不直接 import 具体适配器模块。
 """
 from __future__ import annotations
 
@@ -14,7 +17,8 @@ from app.application.graphs.rag.nodes._emit import emit_step
 from app.application.rag.rag_metrics import build_rag_step
 from app.domain.knowledge_base import KBKind
 from app.domain.rag.intent import IntentResult
-from app.interface.deps import get_container
+from app.infrastructure.adapters.ports_impl import get_generation_adapter
+from app.infrastructure.container import get_container
 
 
 async def intent(state: dict) -> dict:
@@ -23,7 +27,7 @@ async def intent(state: dict) -> dict:
     kb_kind = KBKind(kb.get("kb_kind", "medical_default"))
     last_context = last_context_from_history(state.get("history") or [])
 
-    from app.infrastructure.adapters.query_intent import analyze_intent
+    gen = get_generation_adapter()
 
     t0 = time.perf_counter()
     await emit_step("intent", "pending")
@@ -31,8 +35,8 @@ async def intent(state: dict) -> dict:
     result = None
     degraded = False
     try:
-        result = await asyncio.to_thread(analyze_intent, query, last_context, kb_kind)
-        # API 失败时 analyze_intent 返回 fallback（domain/coverage 为空）→ 判定降级
+        result = await asyncio.to_thread(gen.analyze, query, last_context, kb_kind)
+        # API 失败时 analyze 返回 fallback（domain/coverage 为空）→ 判定降级
         degraded = not (bool(result.domain) or bool(result.coverage))
     except Exception:
         degraded = True
@@ -42,9 +46,7 @@ async def intent(state: dict) -> dict:
 
     expanded_query = None
     if get_container().get_settings().use_query_expansion:
-        from app.infrastructure.adapters.query_expansion import expand_query
-
-        exp = await asyncio.to_thread(expand_query, query)
+        exp = await asyncio.to_thread(gen.expand, query)
         if exp and exp != query:
             expanded_query = exp
             rewritten = f"{rewritten} {exp}"

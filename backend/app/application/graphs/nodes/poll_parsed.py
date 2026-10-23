@@ -14,7 +14,7 @@ import time
 from langgraph.types import interrupt
 
 from app.application.graphs.state import IngestState
-from app.infrastructure.adapters.mineru import MineruFatalError
+from app.domain.ports.exceptions import FatalError
 
 
 async def poll_parsed(state: IngestState) -> dict:
@@ -22,7 +22,7 @@ async def poll_parsed(state: IngestState) -> dict:
 
     resume 模式（retry / 跨 KB 复制已解析文档）：产物已存 MinIO，跳过 poll 直接派发索引。
     """
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     container = get_container()
     mineru = container.get_mineru()
@@ -43,7 +43,7 @@ async def poll_parsed(state: IngestState) -> dict:
     items = None
     try:
         items = await mineru.poll_batch(batch_id, token=token)
-    except MineruFatalError as e:
+    except FatalError as e:
         return {
             "poll_count": count,
             "fatal": True,

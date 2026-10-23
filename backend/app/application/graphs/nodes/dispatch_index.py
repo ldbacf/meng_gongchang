@@ -14,7 +14,7 @@ from app.infrastructure.db.models import TaskStatus
 
 
 async def dispatch_index(state: IngestState) -> dict:
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     container = get_container()
     subgraph = container.get_index_subgraph()

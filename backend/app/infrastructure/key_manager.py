@@ -16,9 +16,15 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from app.domain.ports.exceptions import QuotaExhaustedError as _QuotaExhaustedError
 
-class TokenExhausted(Exception):
-    """所有 token 当日额度均已用完"""
+
+class TokenExhausted(_QuotaExhaustedError, Exception):
+    """所有 token 当日额度均已用完。
+
+    继承 `domain.ports.exceptions.QuotaExhaustedError`：应用层按端口契约捕获，
+    不必 import 本模块（曾因此让 application → infrastructure 多一条依赖）。
+    """
 
 
 @dataclass
@@ -68,7 +74,7 @@ class KeyManager:
             # 计数埋在唯一拒绝点：quota_rejected_total 只在真拒绝时增长，
             # 不做猜测性埋点（否则告警会因别的异常路径误报）。
             try:
-                from app.interface.deps import get_container
+                from app.infrastructure.container import get_container
 
                 get_container().get_metrics().quota_rejected_total.inc()
             except Exception:
@@ -110,5 +116,5 @@ class KeyManager:
 
 def get_key_manager():
     """经 AppContainer 获取 KeyManager（容器单例）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
     return get_container().get_key_manager()

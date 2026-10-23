@@ -72,15 +72,25 @@
 
 ```
 app/
-├── main.py  run_api.py        入口（FastAPI 装配 / 启动）
-├── interface/                 deps · sse · schemas · security · routers/
+├── main.py  run_api.py        入口（纯装配：lifespan/CORS/路由注册/health/tokens-usage）
+├── interface/                 deps · schemas · security · routers/
+│                              routers/{auth,chat,admin,documents,ws,metrics}.py
 ├── application/               graphs/(ingest+rag) · services/ · rag/
-├── domain/                    chunking · document · rag · retrieval · ports（纯函数，零外部依赖）
+├── domain/                    chunking · document · rag · retrieval · ports · sse
+│                              （纯函数，零外部依赖；sse.py 是前后端协议契约）
 └── infrastructure/            adapters/ · db/(models+session) · es/ · milvus/ · redis/ ·
-                               checkpoint/ · observability/ · search.py · indexer.py · ws_manager.py · key_manager.py
+                               checkpoint/ · observability/ · search.py · indexer.py ·
+                               ws_manager.py · key_manager.py · container.py（DI 容器 + 单例）
 ```
-- `domain/` 纯函数、零外部依赖（仅 stdlib）；承载状态机/契约/算法
+
+- `domain/` 纯函数、零外部依赖（仅 stdlib）；承载状态机/契约/算法/端口定义
 - `infrastructure/` 实现端口适配器；客户端经 `AppContainer` 注入（**禁止模块级全局单例**）
+- **容器单例在 `infrastructure/container.py`**（`get_container` / `set_container`）。
+  `interface/deps.py` 只做 re-export，目的是让 application/infrastructure 取容器时
+  不必反向 import interface。静态守卫：`tests/test_no_global.py::test_no_reverse_layer_imports`
+- **图节点不直接 import 具体适配器**，经 `domain/ports/*` + `adapters/ports_impl.py`
+  （`get_search_adapter` / `get_generation_adapter` / `get_index_write_adapter` /
+  `get_document_event_adapter`）。守卫：`tests/test_ports.py`
 - 契约冻结见 `docs/langgraph-refactor/总需求文档.md` §7（pipeline_steps / SSE v1 / doc_id 口径 / TaskStatus 状态机）
 
 ### 配置
@@ -88,7 +98,7 @@ app/
 - 回答模型 = `deepseek-v4-flash`（.env 与 settings 默认值一致）
 
 ### 测试
-- `cd backend && uv run pytest`（150 个单测；契约/状态机/鉴权/图/观测/CLI）
+- `cd backend && uv run pytest`（187 个单测；契约/状态机/鉴权/图/观测/CLI/端口/分层守卫）
 - 手动脚本在 `backend/manual/`（**注意不是 `tests/`**），依赖真实 API key；**控制台乱码时加** `PYTHONIOENCODING=utf-8`
 
 ### 其它

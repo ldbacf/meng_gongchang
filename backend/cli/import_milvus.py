@@ -50,7 +50,7 @@ def _rows_from_file(filepath: Path) -> list[dict]:
 
 def _embed(rows: list[dict], device: str = ""):
     """经容器 embedder 批量编码 content → 写回 row['vector']（唯一工厂，不内联模型）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     model = get_container().get_embedder()
     vectors = model.embed_documents([r["_content"] for r in rows])

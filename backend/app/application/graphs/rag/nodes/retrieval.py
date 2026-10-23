@@ -2,6 +2,9 @@
 
 - `recall_dual` 返回 `(milvus_hits, es_hits)`；短 query（<15 字）重复嵌入增强（在 adapter 内）。
 - 检索异常 → 降级（`degraded=True`，空 hits），继续 fusion（A-4.5 明确低覆盖提示）。
+
+依赖 `domain.ports.retrieval.RetrievalPort`（经 `adapters.ports_impl` 实现），
+不在节点里直接 import 具体检索模块。
 """
 from __future__ import annotations
 
@@ -16,7 +19,9 @@ async def retrieval(state: dict) -> dict:
     kb = state.get("kb") or {}
     search_query = state.get("rewritten_query") or state["query"]
 
-    from app.infrastructure.search import recall_dual
+    from app.infrastructure.adapters.ports_impl import get_search_adapter
+
+    search = get_search_adapter()
 
     t0 = time.perf_counter()
     await emit_step("retrieval", "pending")
@@ -26,7 +31,7 @@ async def retrieval(state: dict) -> dict:
     e_hits: list = []
     try:
         m_hits, e_hits = await asyncio.to_thread(
-            recall_dual, search_query,
+            search.recall_dual, search_query,
             es_index=kb.get("es_index"), milvus_collection=kb.get("milvus_collection"),
         )
     except Exception:

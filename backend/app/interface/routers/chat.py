@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interface.deps import get_container
-from app.interface.sse import to_sse
+from app.domain.sse import to_sse
 from app.interface.security import get_current_user
 from app.infrastructure.db.session import get_db
 from app.infrastructure.db.models import Conversation, Message, User

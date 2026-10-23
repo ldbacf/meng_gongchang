@@ -26,7 +26,7 @@ def expand_query(query: str, timeout: float = 8.0) -> str:
     返回:
         str: 扩展后的专业检索词（空格分隔），失败时返回原 query
     """
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     s = get_settings()
     if not s.deepseek_api_key or s.deepseek_api_key.startswith("your-"):

@@ -210,7 +210,7 @@ def main() -> None:
     logger = setup_script_logging("chunker", no_file=args.no_log_file, tqdm_write=True)
 
     from app.domain.chunking.chunk_document import chunk_document
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -23,7 +23,7 @@ _POLL_WAKE = "wake"
 
 async def _process_job(job) -> str:
     """处理一个队列批：驱动图直到完成（含 poll interrupt resume 循环）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     container = get_container()
     queue = container.get_queue()
@@ -73,7 +73,7 @@ async def _process_job(job) -> str:
 
 async def run_worker():
     """消费循环（claim → 图 → ack）。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     container = get_container()
     await container.start()

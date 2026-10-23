@@ -1,7 +1,8 @@
 """QAGraph 节点共享 helper（非状态推进、纯应用逻辑）。
 
 - `last_context_from_history`：取最近 4 条（2 turns）拼意图识别上下文（指代消解）。
-- `fetch_l0_meta`：批量查 ES L0 chunk 回填 title_cn/journal/md5（自 chat.py `_fetch_l0_meta` 迁入）。
+- `fetch_l0_meta`：委托 `RetrievalPort.fetch_l0_meta`（ES L0 回填属检索能力，实现留在
+  适配器层；本模块保留稳定调用入口供 cite 节点与既有测试使用）。
 """
 from __future__ import annotations
 
@@ -20,41 +21,9 @@ def fetch_l0_meta(hits: list, es_index: str | None = None) -> dict[str, dict]:
     """批量查 ES L0 chunk 回填 title_cn / journal / md5（MEDICAL_DEFAULT 引用需要）。
 
     `es_index` 取自 KB 目标的 es_index（QaState.kb.es_index），后端到点检索，非硬编码缺省。
+    实现见 `infrastructure.adapters.ports_impl.SearchAdapter.fetch_l0_meta`；此处延迟取，
+    保证 `monkeypatch.setattr("app.infrastructure.search.get_es_client", ...)` 仍生效。
     """
-    if not hits:
-        return {}
-    from app.infrastructure.search import get_es_client
+    from app.infrastructure.adapters.ports_impl import get_search_adapter
 
-    doc_ids = sorted({h.doc_id for h in hits if h.doc_id and not h.title_cn})
-    if not doc_ids:
-        return {}
-
-    try:
-        es = get_es_client()
-        resp = es.search(
-            index=es_index or "chunks",
-            body={
-                "size": len(doc_ids),
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"terms": {"doc_id": doc_ids}},
-                            {"term": {"level": "L0"}},
-                        ]
-                    }
-                },
-                "_source": ["doc_id", "title_cn", "journal", "md5"],
-            },
-        )
-        result: dict[str, dict] = {}
-        for hit in resp.get("hits", {}).get("hits", []):
-            src = hit["_source"]
-            did = src.get("doc_id", "")
-            result[did] = {
-                "title_cn": src.get("title_cn", ""),
-                "journal": src.get("journal", ""),
-                "md5": src.get("md5", ""),
-            }
-        return result
-    except Exception:
-        return {}
+    return get_search_adapter().fetch_l0_meta(hits, es_index=es_index)

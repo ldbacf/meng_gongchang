@@ -2,6 +2,9 @@
 
 - `rrf_fusion(hits, es_hits, k=20)` 按 chunk_id 去重 + ES 富字段回填（domain 纯函数）。
 - rerank 失败（抛错或静默全 0 分）→ **保序返回 + `degraded=True`**（不中断，A-4.5）。
+
+rerank 经 `domain.ports.retrieval.RetrievalPort`（adapters.ports_impl 实现），
+不直接 import 具体检索模块。
 """
 from __future__ import annotations
 
@@ -14,9 +17,9 @@ from app.domain.retrieval.rrf import rrf_fusion
 
 
 async def _rerank(query: str, hits: list):
-    from app.infrastructure.search import rerank
+    from app.infrastructure.adapters.ports_impl import get_search_adapter
 
-    return await asyncio.to_thread(rerank, query, hits, 5)
+    return await asyncio.to_thread(get_search_adapter().rerank, query, hits, 5)
 
 
 async def fusion(state: dict) -> dict:

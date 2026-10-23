@@ -12,7 +12,7 @@ from app.application.graphs.state import IngestState
 
 async def download_unpack(state: IngestState) -> dict:
     """下载 done 产物 → 解包存 MinIO → 标记 PARSED；failed 产物标记 FAILED。"""
-    from app.interface.deps import get_container
+    from app.infrastructure.container import get_container
 
     container = get_container()
     mineru = container.get_mineru()
