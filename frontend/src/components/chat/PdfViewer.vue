@@ -68,8 +68,15 @@ async function _openByUrl(): Promise<pdfjsLib.PDFDocumentProxy> {
       httpHeaders: props.headers,
       // 分片大小：单请求 128KB 在该链路上约 0.5s，兼顾首屏与请求数
       rangeChunkSize: 128 * 1024,
+      // 下面两个开关缺一不可（对照 pdfjs PDFFetchStreamReader 实现）：
+      //  pdf.js 一定会先发一个**不带 Range** 的 GET，仅凭其响应头判断能否分片
+      //  （validateRangeRequestCapabilities 读 Content-Length / Accept-Ranges）。
+      //  之后若 disableStream=false，它会继续把这份响应完整读完，再走分片 ——
+      //  等于白拉一整份（实测 1.9MB / 9s），分片反成额外开销。
+      //  disableStream=true 才会在确认支持 Range 后立刻 cancel 掉这个流。
+      //  disableAutoFetch=true 避免后台预取未查看的页。
+      disableStream: true,
       disableAutoFetch: true,
-      disableStream: false,
     })
     return await task.promise
   } catch (e) {
