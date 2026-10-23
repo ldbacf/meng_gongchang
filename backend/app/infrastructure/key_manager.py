@@ -39,6 +39,15 @@ class KeyManager:
     async def remaining(self, token_id: str) -> int:
         return max(0, self._max_pages - await self._quota_store.balance(token_id))
 
+    @property
+    def token_ids(self) -> list[str]:
+        """全部 token_id（供额度监控遍历；不含明文 token）。"""
+        return self._vault.token_ids
+
+    async def remaining_map(self) -> dict[str, int]:
+        """{token_id: 剩余页数} —— /metrics 的 quota_remaining 采集入口。"""
+        return {tid: await self.remaining(tid) for tid in self._vault.token_ids}
+
     async def acquire(self, pages_needed: int) -> Reservation:
         """
         Best-fit 分配: 选剩余额度最接近 pages_needed 的 key（按 Redis balance），
@@ -56,6 +65,14 @@ class KeyManager:
                 best, best_remain = tid, rem
 
         if best is None:
+            # 计数埋在唯一拒绝点：quota_rejected_total 只在真拒绝时增长，
+            # 不做猜测性埋点（否则告警会因别的异常路径误报）。
+            try:
+                from app.interface.deps import get_container
+
+                get_container().get_metrics().quota_rejected_total.inc()
+            except Exception:
+                pass  # 监控不可用不该改变业务失败路径
             raise TokenExhausted(
                 f"所有 Token 当日额度已用完 (max={self._max_pages}/key)\n"
                 + await self.usage_report()

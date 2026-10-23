@@ -103,6 +103,13 @@ class QuotaStoreRedis:
         return int(raw or 0)
 
     async def is_exhausted(self, key_ids: list[str], max_pages: int) -> bool:
-        return bool(key_ids) and all(
-            (await self.balance(kid)) >= max_pages for kid in key_ids
-        )
+        """所有 key 当日额度是否都已用尽。
+
+        注意：**不能**写成 `all((await self.balance(kid)) >= max_pages for kid in key_ids)`——
+        `await` 出现在生成器表达式内会让整个表达式变成 async_generator，`all()` 收到它
+        直接 TypeError: 'async_generator' object is not iterable。必须先把额度取成列表。
+        """
+        if not key_ids:
+            return False
+        balances = [await self.balance(kid) for kid in key_ids]
+        return all(used >= max_pages for used in balances)

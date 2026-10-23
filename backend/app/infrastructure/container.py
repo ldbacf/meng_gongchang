@@ -386,12 +386,19 @@ class AppContainer:
         # checkpoint saver（AsyncPostgresSaver，表已由 Alembic 0002 建好）
         # 创建失败降级（如 Windows ProactorEventLoop 下 psycopg 不可用）——
         # get_ingest_graph 使用时会抛明确错误；API 本体仍可启动。
+        #
+        # 双层超时：psycopg 的 connect_timeout 管连接建立，asyncio.wait_for 兜住
+        # setup() 等后续步骤。缺了这层，PG 不可达时本方法会永久挂住——进程活着、
+        # 端口不通、健康检查探不到、编排不会重启，比直接失败难排查得多。
         if self._checkpointer is None and self._fake("checkpointer") is None:
             try:
+                import asyncio as _asyncio
+
                 from app.infrastructure.checkpoint.pg_saver import create_pg_saver
 
-                self._checkpointer = await create_pg_saver(
-                    self.get_settings().resolved_database_url
+                self._checkpointer = await _asyncio.wait_for(
+                    create_pg_saver(self.get_settings().resolved_database_url),
+                    timeout=15,
                 )
                 print("[API] Postgres checkpointer 就绪")
             except Exception as e:
@@ -404,6 +411,11 @@ class AppContainer:
                         "并给 uvicorn 传 loop=\"none\"（uvicorn ≥0.36 会用 loop_factory 绕过 policy，"
                         "默认的 auto/asyncio 在 Windows 上被硬编码为 ProactorEventLoop）。"
                         "详见 app/run_api.py。"
+                    )
+                elif "timeout" in msg.lower() or type(e).__name__ == "TimeoutError":
+                    print(
+                        "[API] 提示: 连接 PG 超时。请确认 PostgreSQL 已启动"
+                        "（`docker compose up -d postgres`）且 POSTGRES_HOST/PORT 可达。"
                     )
 
         self._started = True

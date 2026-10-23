@@ -28,7 +28,7 @@ def normalize_dsn(dsn: str) -> str:
     )
 
 
-async def create_pg_saver(dsn: str) -> AsyncPostgresSaver:
+async def create_pg_saver(dsn: str, connect_timeout: int = 5) -> AsyncPostgresSaver:
     """创建 AsyncPostgresSaver（返回后由调用方负责 close 连接）。
 
     **连接参数必须与库自身的 `AsyncPostgresSaver.from_conn_string` 一致**
@@ -39,9 +39,15 @@ async def create_pg_saver(dsn: str) -> AsyncPostgresSaver:
     （图照常跑完、`setup()` 也"成功"），静默失效。后果是 C6 每-superstep checkpoint、
     崩溃续跑、retry 全都形同虚设。
 
+    **`connect_timeout` 必须显式传**：PG 端口不通时 psycopg 的默认行为不是快速失败，
+    而是无限等待（Windows/SelectorEventLoop 下表现为 `container.start()` 永久挂住，
+    进程活着、端口不通、健康检查探不到、编排也不会重启）。容器编排里"卡住"比"退出"
+    难排查得多，故给一个短超时让启动快速失败并落到既有的降级分支。
+
     - `autocommit=True`：决定性（否则写入永不提交）。
     - `row_factory=dict_row`：库内部按 `row["v"]` 取值，元组行会 TypeError。
     - `prepare_threshold=0`：与库一致，避免连接池外的 prepared statement 缓存问题。
+    - `connect_timeout`：连接建立超时（秒），防不可达时启动挂死。
     """
     import psycopg
     from psycopg.rows import dict_row
@@ -51,6 +57,7 @@ async def create_pg_saver(dsn: str) -> AsyncPostgresSaver:
         autocommit=True,
         prepare_threshold=0,
         row_factory=dict_row,
+        connect_timeout=connect_timeout,
     )
     try:
         saver = AsyncPostgresSaver(conn)

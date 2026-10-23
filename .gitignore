@@ -25,4 +25,17 @@ node_modules/
 .coverage.*
 htmlcov/
 .pytest_cache/
-./docs/error_ok
+
+# ── 本地数据 / 归档（体积大，不入库）──
+# backend/data.zip 是数 GB 级本地数据快照，绝不该进仓库
+*.zip
+*.tar.gz
+backend/data/
+backend/chunks/
+backend/log/
+backend/models/
+
+# ── 数据导出 / 备份（含真实会话内容，不入库）──
+# docs/error_ok/ 下的 model-label-*.csv 是 rag_steps 全量导出，
+# 含真实提问与检索结果；排错记录 .md 保留入库，这份数据不保留。
+docs/error_ok/*.csv

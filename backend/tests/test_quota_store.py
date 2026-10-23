@@ -101,3 +101,30 @@ async def test_quota_daily_reset(redis_url):
     await store.reserve("tk_1", 7, "res-day2")
     assert await store.balance("tk_1") == 7  # 8-17 自动重置
     await r.aclose()
+
+
+@pytest.mark.asyncio
+async def test_quota_is_exhausted(redis_url):
+    """is_exhausted 的三个分支。
+
+    回归：曾写成 `all((await self.balance(kid)) >= max_pages for kid in key_ids)`——
+    `await` 在生成器表达式内会让整个表达式变成 async_generator，`all()` 收到它直接
+    `TypeError: 'async_generator' object is not iterable`。该 bug 让
+    `/api/v1/tokens/usage` 稳定 500，而此前的额度用例没覆盖这个方法。
+    """
+    r = _async_redis(redis_url)
+    store = QuotaStoreRedis(r)
+
+    # 空列表：没有 key 不算「全部用尽」
+    assert await store.is_exhausted([], 10) is False
+
+    # 部分用尽：只要还有一个 key 有余量就不算用尽
+    await store.reserve("tk_1", 10, "res-x1")
+    await store.reserve("tk_2", 3, "res-x2")
+    assert await store.is_exhausted(["tk_1", "tk_2"], 10) is False
+
+    # 全部用尽
+    await store.reserve("tk_2", 7, "res-x3")
+    assert await store.is_exhausted(["tk_1", "tk_2"], 10) is True
+
+    await r.aclose()

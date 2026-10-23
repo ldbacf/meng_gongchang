@@ -35,6 +35,8 @@ async def lifespan(app: FastAPI):
     await container.start()  # DB 连通性校验 + MinIO 建桶 + bge-m3 预热（幂等）
 
     # 创建默认管理员
+    # 凭据从配置读取（BOOTSTRAP_ADMIN_PASSWORD），**不再硬编码** admin123：
+    # 源码里的公开默认密码等于把后台送人。留空则不建默认账号，由运维显式配置。
     from sqlalchemy import func as sql_func  # noqa: F811
 
     async with async_session() as session:
@@ -46,16 +48,25 @@ async def lifespan(app: FastAPI):
         )
         count = result.scalar()
         if count == 0:
-            admin = User(
-                username="admin",
-                password_hash=hash_password("admin123"),
-                role="admin",
-                enabled=True,
-            )
-            session.add(admin)
-            await session.commit()
-            print("[API] 已创建默认管理员: admin / admin123")
-            print("[API] 请在首次登录后修改密码!")
+            _bs = get_settings()
+            if _bs.bootstrap_admin_password:
+                admin = User(
+                    username=_bs.bootstrap_admin_username,
+                    password_hash=hash_password(_bs.bootstrap_admin_password),
+                    role="admin",
+                    enabled=True,
+                )
+                session.add(admin)
+                await session.commit()
+                print(
+                    f"[API] 已创建默认管理员: {_bs.bootstrap_admin_username}"
+                    "（密码来自 BOOTSTRAP_ADMIN_PASSWORD，请登录后立即修改）"
+                )
+            else:
+                print(
+                    "[API] 警告: 用户表为空且未配置 BOOTSTRAP_ADMIN_PASSWORD，"
+                    "未创建默认管理员。请设置该环境变量后重启。"
+                )
 
     # 创建默认知识库 + 回填现有文档
     async with async_session() as session:
@@ -332,8 +343,9 @@ async def upload_documents_batch(
     kb_id: str | None = Query(None),
     _admin=Depends(require_admin),
 ):
-    if len(files) > get_settings().chunk_size:
-        raise HTTPException(400, f"单次最多 {get_settings().chunk_size} 个文件")
+    _max_files = get_settings().max_upload_files
+    if len(files) > _max_files:
+        raise HTTPException(400, f"单次最多 {_max_files} 个文件")
 
     import uuid as _uuid
     _kb_id = _uuid.UUID(kb_id) if kb_id else None

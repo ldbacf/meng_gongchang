@@ -94,6 +94,25 @@ class QueueAdapter:
             if "BUSYGROUP" not in str(e):
                 raise
 
+    async def depth(self) -> int:
+        """队列积压条数（待投递 + 已投递未 ack）。
+
+        供 /metrics 的 `queue_depth` gauge 采集。取不到就返回 0——
+        监控不该因为一次 Redis 抖动把整个 /metrics 打挂。
+        """
+        try:
+            info = await self._redis.xinfo_groups(self._stream)
+        except Exception:
+            return 0
+        for g in info:
+            if g.get("name") == self._group:
+                lag = g.get("lag")
+                pending = g.get("pending") or 0
+                if lag is None:
+                    return int(pending)
+                return int(lag) + int(pending)
+        return 0
+
     # ── 写 ────────────────────────────────────────────────────
 
     async def enqueue(

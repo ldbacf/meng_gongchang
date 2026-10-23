@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
@@ -11,6 +12,7 @@ export default defineConfig({
   },
   server: {
     // 5173 在本机落入 Windows 保留端口段(5172-5271)无法绑定，改用 5171
+    // 后端默认 CORS 也按 5171 配置（backend/app/infrastructure/settings.py）
     port: 5171,
     proxy: {
       '/api': {
@@ -19,5 +21,10 @@ export default defineConfig({
         ws: true,
       },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.{test,spec}.{ts,js}'],
+    globals: true,
   },
 })

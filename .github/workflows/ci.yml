@@ -13,6 +13,36 @@ jobs:
     defaults:
       run:
         working-directory: backend
+
+    # 集成用例（test_ingest_graph / test_rag_graph / test_services /
+    # test_pg_saver_persist / test_kb_authz）连真实 PG 与 Redis。
+    # 以前 CI 里没有这两个服务 → 它们在 CI 必然 ConnectionRefusedError，
+    # 而本地因 docker 常驻是绿的，"全绿"只在开发机上成立。
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mineru
+          POSTGRES_PASSWORD: mineru123
+          POSTGRES_DB: mineru_pipeline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mineru -d mineru_pipeline"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -27,13 +57,51 @@ jobs:
       - name: Sync dependencies
         run: uv sync --extra dev
 
-      - name: Run pytest
+      - name: Prepare database schema
         env:
           # 单测构造 Settings 时使用（.env 不存在于 CI）
           JWT_SECRET_KEY: ci-secret
+        run: uv run alembic upgrade head
+
+      - name: Run pytest
+        env:
+          JWT_SECRET_KEY: ci-secret
+          # 用 127.0.0.1 而非 localhost：后者可能解析到 ::1，psycopg async 会静默卡死
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: mineru
+          POSTGRES_PASSWORD: mineru123
+          POSTGRES_DB: mineru_pipeline
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: "6379"
+          PYTHONIOENCODING: utf-8
         run: uv run pytest
 
       - name: Verify Alembic migrations (offline SQL)
         env:
           JWT_SECRET_KEY: ci-secret
         run: uv run alembic upgrade head --sql > /dev/null
+
+  # 前端此前完全无测试。这里只覆盖纯逻辑层（store 的 SSE 帧处理），
+  # 不引入组件快照——目标是把"曾打崩整棵 vdom 的那类回归"钉住，不是追求覆盖率。
+  frontend-tests:
+    name: Frontend unit tests (frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        # 项目内 @vitejs/plugin-vue@5 的 peer 要求 vite ^5||^6，而实际用 vite 8；
+        # 该冲突在本仓库已存在，用 legacy-peer-deps 避免 CI 因无关依赖解析而红。
+        run: npm ci --legacy-peer-deps
+
+      - name: Run vitest
+        run: npm test

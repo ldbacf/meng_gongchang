@@ -1,0 +1,105 @@
+# Prometheus 告警规则（阶段 5 观测三件套的「告警」侧）。
+#
+# 所有 expr 只使用 MetricsRegistry 真实声明的指标名
+# （app/infrastructure/observability/metrics.py），不臆造指标。
+#
+# 设计取向：宁可少而准。这里的每条规则都对应一个「功能已经坏了」的可判定事实，
+# 而不是「可能有点慢」的主观阈值。
+groups:
+  - name: medrag-api
+    rules:
+      # ── 可用性 ────────────────────────────────────────────────
+      - alert: BackendDown
+        expr: up{job="medrag-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MedRAG 后端不可达"
+          description: "Prometheus 连续 2 分钟抓不到 {{ $labels.instance }} 的 /metrics。"
+
+      - alert: NoRagTraffic
+        expr: increase(rag_total[30m]) == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "30 分钟无问答流量"
+          description: "rag_total 30 分钟内无增长。若为业务低峰可忽略；否则检查前端/网关。"
+
+      # ── 错误率 ────────────────────────────────────────────────
+      - alert: LlmErrorRateHigh
+        expr: rate(llm_error_total[5m]) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM 调用错误率偏高"
+          description: "近 5 分钟 LLM 错误 {{ $value | printf \"%.2f\" }} 次/秒，回答功能大概率不可用。"
+
+      - alert: MineruErrorRateHigh
+        expr: rate(mineru_error_total[5m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MinerU 调用错误率偏高"
+          description: "近 5 分钟 MinerU 错误 {{ $value | printf \"%.2f\" }} 次/秒，入库链路可能受阻。"
+
+      # ── 降级 ──────────────────────────────────────────────────
+      - alert: RagDegraded
+        expr: increase(rag_degraded_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "问答出现降级（step={{ $labels.step }}）"
+          description: "检索或重排走了降级分支，回答质量下降但仍可用。检查 ES/Milvus/rerank 连通性。"
+
+      # ── 容量 ──────────────────────────────────────────────────
+      - alert: QueueBacklog
+        expr: queue_depth{queue="mineru:poll_queue"} > 50
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "入库队列积压超过 50"
+          description: "当前积压 {{ $value }}。检查 ingestion-worker 是否存活、MinerU 是否限流。"
+
+      - alert: QuotaNearlyExhausted
+        expr: quota_remaining < 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MinerU 额度即将用尽（key={{ $labels.key_id }}）"
+          description: "key {{ $labels.key_id }} 剩余 {{ $value }} 页。额度耗尽后入库会整批被拒。"
+
+      - alert: QuotaRejected
+        expr: increase(quota_rejected_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "出现额度拒绝"
+          description: "有提交因额度不足被拒。需补 key 或等次日重置。"
+
+      # ── 延迟 ──────────────────────────────────────────────────
+      - alert: LlmLatencySlow
+        # 回答步 P95 超过 30s（流式回答的长尾容忍度）
+        expr: histogram_quantile(0.95, sum(rate(llm_latency_seconds_bucket[5m])) by (le)) > 30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM 回答 P95 延迟超过 30s"
+          description: "当前 P95 为 {{ $value | printf \"%.1f\" }}s，用户体验明显变差。"
+
+      - alert: RetrievalLatencySlow
+        expr: histogram_quantile(0.95, sum(rate(retrieval_latency_seconds_bucket[5m])) by (le, backend)) > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "检索后端 P95 延迟超过 10s（{{ $labels.backend }}）"
+          description: "{{ $labels.backend }} P95 为 {{ $value | printf \"%.1f\" }}s。检查该后端负载与索引大小。"

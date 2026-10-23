@@ -46,6 +46,59 @@ def test_metrics_endpoint():
         assert name in body, f"missing metric: {name}"
 
 
+async def test_metrics_refreshes_gauges():
+    """队列积压 / 额度剩余必须在抓取时现取。
+
+    回归：这两个 gauge 只在注册表里声明、**没有任何写入方**，导致 /metrics 里永远是 0，
+    依赖它们的告警规则（QueueBacklog / QuotaNearlyExhausted）永不可能触发。
+    """
+    from app.interface.routers.metrics import _refresh_gauges
+
+    class _Q:
+        async def depth(self):
+            return 7
+
+    class _KM:
+        @property
+        def token_ids(self):
+            return ["tk_1", "tk_2"]
+
+        async def remaining_map(self):
+            return {"tk_1": 3, "tk_2": 900}
+
+    container = AppContainer(
+        settings=Settings(_env_file=None, jwt_secret_key="x"),
+        fakes={"queue": _Q(), "key_manager": _KM()},
+    )
+
+    await _refresh_gauges(container)
+
+    metrics = container.get_metrics()
+    assert metrics.queue_depth.labels(queue=container.get_settings().redis_queue)._value.get() == 7
+    assert metrics.quota_remaining.labels(key_id="tk_1")._value.get() == 3
+    assert metrics.quota_remaining.labels(key_id="tk_2")._value.get() == 900
+
+
+async def test_metrics_gauge_refresh_survives_backend_failure():
+    """/metrics 不该因为 Redis/额度查询抖动而 500。"""
+
+    class _Boom:
+        async def depth(self):
+            raise RuntimeError("redis down")
+
+        async def remaining_map(self):
+            raise RuntimeError("redis down")
+
+    container = AppContainer(
+        settings=Settings(_env_file=None, jwt_secret_key="x"),
+        fakes={"queue": _Boom(), "key_manager": _Boom()},
+    )
+    from app.interface.routers.metrics import _refresh_gauges
+
+    await _refresh_gauges(container)  # 不抛
+    assert container.get_metrics().render()  # 仍可渲染
+
+
 # ── T-5.4 ──────────────────────────────────────────────────────
 
 

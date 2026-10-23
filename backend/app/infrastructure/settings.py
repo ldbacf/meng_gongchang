@@ -138,7 +138,10 @@ class Settings(BaseSettings):
     use_query_expansion: bool = False
 
     # ── CORS ────────────────────────────────────────────────────
-    cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    # 默认值须与实际前端端口一致：vite 用 5171（5173 落在 Windows 保留端口段，
+    # 见 frontend/vite.config.ts）。dev 走 vite 代理是同源请求、CORS 不触发，
+    # 故端口写错在开发期不可见——前端独立部署时才会全站被拒。
+    cors_origins: str = "http://localhost:5171,http://127.0.0.1:5171"
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -148,6 +151,14 @@ class Settings(BaseSettings):
     poll_interval: int = 5
     max_poll_time: int = 1200
     chunk_size: int = 50
+    # 单次批量上传的文件数上限（与切分粒度 chunk_size 无关，勿混用）
+    max_upload_files: int = 50
+
+    # ── 启动引导 ────────────────────────────────────────────────
+    # 空库首启时创建的默认管理员密码。必须显式配置；留空则不建默认账号
+    # （避免 admin/admin123 这类公开默认凭据进入生产）。
+    bootstrap_admin_username: str = "admin"
+    bootstrap_admin_password: str = ""
 
 
 @lru_cache
