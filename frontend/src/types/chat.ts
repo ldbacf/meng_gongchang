@@ -1,3 +1,5 @@
+import type { StepStatus } from './step'
+
 export interface Citation {
   id: string
   title: string
@@ -52,12 +54,8 @@ export interface AnswerMetrics {
 export type RagStepMetrics = IntentMetrics | RetrievalMetrics | FusionMetrics | AnswerMetrics
 
 export interface RagStep {
-  /**
-   * 后端实际写的是 `"done"`（`build_rag_step` 的默认值），而 SSE 的 `s` 字段也是
-   * `"done"`；早期前端把它映射成了 `"completed"`。落库回放时拿到的是原始 `"done"`，
-   * 只认 `"completed"` 会导致勾选态丢失（表现为空心圈、点不开）。两者都接受。
-   */
-  status: 'pending' | 'done' | 'completed' | 'failed'
+  /** 与后端 `app/domain/lifecycle.py` 同一枚举；`done` 是规范成功态 */
+  status: StepStatus
   title: string
   summary?: string
   elapsed_ms?: number

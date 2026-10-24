@@ -8,14 +8,22 @@
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Literal, TypedDict
+from typing import TypedDict
+
+# 状态枚举来自全后端唯一契约，本模块不再重复定义
+from app.domain.lifecycle import (
+    LEGACY_STEP_ALIASES,
+    STEP_STATUSES,
+    StepStatus,
+    normalize_step_status,
+)
 
 PIPELINE_STEPS_ORDER: list[str] = [
     "upload", "mineru", "chunking", "embedding", "es_write", "milvus",
 ]
-VALID_STATUS: set[str] = {"pending", "running", "done", "failed", "skipped"}
 
-StepStatus = Literal["pending", "running", "done", "failed", "skipped"]
+#: 兼容旧调用点（取值集合的唯一真相源在 `app.domain.lifecycle`）
+VALID_STATUS: frozenset[str] = STEP_STATUSES
 
 
 class StepState(TypedDict, total=False):
@@ -64,12 +72,17 @@ def validate(steps: dict | None) -> dict:
     for step in PIPELINE_STEPS_ORDER:
         if step not in steps:
             raise PipelineStepsError(f"缺少步骤 {step!r}")
-        st = steps[step]
+        st = dict(steps[step]) if isinstance(steps[step], dict) else steps[step]
         if not isinstance(st, dict):
             raise PipelineStepsError(f"步骤 {step!r} 状态必须是 dict")
+        # 历史别名（completed/success/error）就地归一，避免旧数据让整个文档打不开；
+        # 真正未知的值仍然拒绝。
+        raw = st.get("status")
+        if isinstance(raw, str) and raw.strip().lower() in LEGACY_STEP_ALIASES:
+            st["status"] = normalize_step_status(raw)
         if st.get("status") not in VALID_STATUS:
             raise PipelineStepsError(f"步骤 {step!r} 非法 status: {st.get('status')!r}")
         if "ts" not in st:
             raise PipelineStepsError(f"步骤 {step!r} 缺少 ts")
-        out[step] = dict(st)
+        out[step] = st
     return out

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { RagSteps, RagStep } from '@/types'
+import { isStepDone, normalizeStepStatus } from '@/types/step'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 
@@ -19,11 +20,11 @@ function get(key: StepKey): RagStep | undefined {
 }
 
 /**
- * 完成判定：后端写入/回放的是 `"done"`，SSE 映射后是 `"completed"`，两种都要认。
- * 只认一种时，历史会话回放会丢勾选态（表现为空心圈、点不开）。
+ * 完成判定走共享契约（`types/step.ts`）：`done` / `skipped` 都算走完。
+ * 旧数据里的 `completed` 在边界由 `normalizeStepStatus` 归一，组件只认规范值。
  */
 function isDone(step: RagStep | undefined): boolean {
-  return step?.status === 'completed' || step?.status === 'done'
+  return isStepDone(normalizeStepStatus(step?.status))
 }
 
 /**
