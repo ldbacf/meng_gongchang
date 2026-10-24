@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import type { Citation, Message } from '@/types'
 import { useMarkdown } from '@/composables/useMarkdown'
-import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import RagPipelineSimple from './RagPipelineSimple.vue'
-import CitationSummary from './CitationSummary.vue'
-import { Sparkles, ChevronDown, AlertCircle, Copy, Check } from 'lucide-vue-next'
+import { Copy, Check, ThumbsUp, RotateCw, BookOpen, ChevronDown, AlertCircle } from 'lucide-vue-next'
 
 const chatStore = useChatStore()
 
@@ -41,14 +40,73 @@ function handleContentClick(e: MouseEvent) {
 }
 
 const copied = ref(false)
+/** 复制对勾 2.5s 后自熄 */
+let copyTimer: ReturnType<typeof setTimeout> | undefined
 
 async function copyContent() {
   const text = props.isStreaming && props.streamContent !== undefined ? props.streamContent : props.message.content
   try {
     await navigator.clipboard.writeText(text)
     copied.value = true
-    setTimeout(() => { copied.value = false }, 2000)
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copied.value = false }, 2500)
   } catch { /* fallback */ }
+}
+
+// ── 流式逐字「晕开」 ──
+//
+// 正文用 v-html 每次整体替换 innerHTML，所有节点都是新的 —— 如果给整段都加
+// 入场动画，每次重渲染都会重播一遍（就是之前引用标记闪烁的同一个坑）。
+// 所以只在**本次新增的那几个字**上挂动画：下一 tick 它们会被替换成普通文本，
+// 不会再重播。
+const bodyRef = ref<HTMLElement | null>(null)
+let prevTextLen = 0
+
+watch(renderedContent, async () => {
+  if (!props.isStreaming) { prevTextLen = 0; return }
+  await nextTick()
+  const el = bodyRef.value
+  if (!el) return
+  const total = el.textContent?.length ?? 0
+  if (total > prevTextLen) animateTail(el, prevTextLen, total)
+  prevTextLen = total
+})
+
+function animateTail(el: HTMLElement, from: number, to: number) {
+  const need0 = to - from
+  if (need0 <= 0) return
+
+  // 只取尾部文本节点，避免每次遍历整棵子树
+  const texts: Text[] = []
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let node: Node | null
+  while ((node = walker.nextNode())) texts.push(node as Text)
+
+  let need = need0
+  for (let i = texts.length - 1; i >= 0 && need > 0; i--) {
+    const tn = texts[i]
+    const value = tn.nodeValue ?? ''
+    if (!value) continue
+    const take = Math.min(need, value.length)
+    const cut = value.length - take
+    const tail = value.slice(cut)
+
+    const frag = document.createDocumentFragment()
+    let idx = 0
+    for (const ch of tail) {
+      const span = document.createElement('span')
+      span.className = 'char-in'
+      // 相邻字错开 12ms：与 90ms 的单字动画配合，6 个字 150ms 内跑完，
+      // 不会被下一次重渲染截断（30ms 会拖到 240ms）
+      span.style.animationDelay = `${idx * 12}ms`
+      span.textContent = ch
+      frag.appendChild(span)
+      idx++
+    }
+    tn.nodeValue = value.slice(0, cut)
+    tn.parentNode?.insertBefore(frag, tn.nextSibling)
+    need -= take
+  }
 }
 
 const hasRagSteps = computed(() => {
@@ -56,181 +114,141 @@ const hasRagSteps = computed(() => {
   return steps && Object.values(steps).some((s) => s !== undefined)
 })
 
-// ── Run status ──
+const stepCount = computed(() => Object.values(props.message.ragSteps ?? {}).filter(Boolean).length)
 
 const isProcessing = computed(() => {
   const steps = props.message.ragSteps
   if (!steps) return false
-  const vals = Object.values(steps)
-  return vals.some((s) => s?.status === 'pending')
+  return Object.values(steps).some((s) => s?.status === 'pending')
 })
 
-// ── Random text rotation ──
+// ── 处理中的文案轮换 ──
 
-const statusPhrases = [
-  '正在理解问题...',
-  '检索文献中...',
-  '分析医学资料...',
-  '梳理临床信息...',
-  '生成医学回答...',
-  '查阅知识库...',
-  '推理分析中...',
-]
-
-const currentPhrase = ref('')
+const statusPhrases = ['正在理解问题…', '检索文献中…', '分析医学资料…', '梳理临床信息…', '生成医学回答…']
+const currentPhrase = ref(statusPhrases[0])
 let phraseTimer: ReturnType<typeof setInterval> | undefined
 let lastIndex = -1
 
-function pickRandomPhrase() {
-  let idx: number
-  do {
-    idx = Math.floor(Math.random() * statusPhrases.length)
-  } while (idx === lastIndex && statusPhrases.length > 1)
-  lastIndex = idx
-  currentPhrase.value = statusPhrases[idx]
+function pickPhrase() {
+  let i: number
+  do { i = Math.floor(Math.random() * statusPhrases.length) } while (i === lastIndex && statusPhrases.length > 1)
+  lastIndex = i
+  currentPhrase.value = statusPhrases[i]
 }
 
-function startPhraseRotation() {
-  pickRandomPhrase()
-  if (!phraseTimer) {
-    phraseTimer = setInterval(pickRandomPhrase, 2000)
-  }
+function startRotation() {
+  pickPhrase()
+  if (!phraseTimer) phraseTimer = setInterval(pickPhrase, 2200)
+}
+function stopRotation() {
+  if (phraseTimer) { clearInterval(phraseTimer); phraseTimer = undefined }
 }
 
-function stopPhraseRotation() {
-  if (phraseTimer) {
-    clearInterval(phraseTimer)
-    phraseTimer = undefined
-  }
-  currentPhrase.value = ''
-}
+watch(isProcessing, (p) => (p ? startRotation() : stopRotation()), { immediate: true })
+onBeforeUnmount(stopRotation)
 
-// Watch processing state
-watch(isProcessing, (processing) => {
-  if (processing) {
-    startPhraseRotation()
-  } else {
-    stopPhraseRotation()
-  }
-}, { immediate: true })
+// ── 步骤展开 ──
 
-onBeforeUnmount(() => {
-  stopPhraseRotation()
-})
-
-// ── Persistent expand toggle ──
-
-const ragExpanded = ref(localStorage.getItem('medrag_rag_expanded') !== 'false')
-function toggleRag() {
-  ragExpanded.value = !ragExpanded.value
-  localStorage.setItem('medrag_rag_expanded', String(ragExpanded.value))
-}
+// 默认展开：步骤是逐个长出来的，收起来就看不到"渐进"的观感
+const stepsOpen = ref(true)
 </script>
 
 <template>
-  <div class="group px-4 py-4">
-    <div class="flex max-w-[85%] gap-3">
-      <!-- Avatar -->
+  <div class="group/turn flex gap-3.5 py-4">
+    <!-- AI 标记 -->
+    <div class="shrink-0 pt-0.5">
       <div
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-sky-400 shadow-sm"
+        class="grid h-[26px] w-[26px] place-items-center rounded-full text-white shadow-[0_2px_8px_rgba(66,133,244,.3)]"
+        style="background: linear-gradient(100deg, var(--grad-1), var(--grad-2), var(--grad-3))"
       >
-        <Sparkles :size="16" class="text-white" />
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.4l1.9 5.1 5.1 1.9-5.1 1.9L12 16.4l-1.9-5.1L5 9.4l5.1-1.9z" /></svg>
       </div>
+    </div>
 
-      <!-- Right column -->
-      <div class="min-w-0 flex-1">
-        <!-- Thinking pill -->
+    <div class="min-w-0 flex-1">
+      <!-- RAG 步骤（可折叠） -->
+      <div v-if="hasRagSteps" class="mb-3.5 overflow-hidden rounded-lg border border-line bg-surface-2">
         <button
-          v-if="hasRagSteps"
-          class="mb-2 inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium shadow-sm transition-all duration-200 hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:outline-none"
-          :class="{
-            'animate-breathe border-primary-400 bg-primary-50 text-primary-700': isProcessing,
-            'border-primary-200 bg-primary-50/70 text-primary-700 hover:border-primary-300 hover:bg-primary-100': !isProcessing,
-          }"
-          @click="toggleRag"
+          class="flex w-full items-center gap-2 px-3 py-2.5 text-[12.5px] text-muted transition-colors hover:bg-surface"
+          @click="stepsOpen = !stepsOpen"
         >
-          <Sparkles
-            :size="13"
-            :class="{ 'animate-spin': isProcessing }"
-          />
-          <span v-if="isProcessing && currentPhrase">{{ currentPhrase }}</span>
-          <span v-else>RAG 检索分析</span>
+          <svg v-if="!isProcessing" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.4l1.9 5.1 5.1 1.9-5.1 1.9L12 16.4l-1.9-5.1L5 9.4l5.1-1.9z" /></svg>
+          <span v-else class="h-3 w-3 animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
+
+          <span v-if="isProcessing" class="font-medium text-accent-text">{{ currentPhrase }}</span>
+          <span v-else>检索与推理过程 · {{ stepCount }} 步</span>
+
           <ChevronDown
             :size="13"
-            class="transition-transform duration-200"
-            :class="{ 'rotate-180': ragExpanded }"
+            class="ml-auto transition-transform"
+            :class="{ 'rotate-180': stepsOpen }"
           />
         </button>
-
-        <!-- RAG Pipeline -->
-        <RagPipelineSimple
-          v-if="ragExpanded && hasRagSteps"
-          :steps="message.ragSteps!"
-        />
-
-        <!-- Content card -->
         <div
-          class="rounded-2xl border border-primary-300 bg-primary-100 px-4 py-3 shadow-md backdrop-blur-sm"
+          class="grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(.215,.61,.355,1)]"
+          :style="{ gridTemplateRows: stepsOpen ? '1fr' : '0fr' }"
         >
-          <div
-            v-if="renderedContent"
-            class="markdown-body text-sm leading-relaxed text-slate-700"
-            :class="{ 'is-streaming': isStreaming }"
-            v-html="renderedContent"
-            @click="handleContentClick"
-          />
-
-          <!-- Copy button -->
-          <div class="mt-1 flex justify-end opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-hover:duration-100">
-            <button
-              class="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-primary-200 hover:text-slate-600 active:scale-90"
-              title="复制回答"
-              @click="copyContent"
-            >
-              <Check v-if="copied" :size="12" class="text-emerald-500" />
-              <Copy v-else :size="12" />
-            </button>
-          </div>
-
-          <div
-            v-if="isStreaming && !streamContent"
-            class="flex items-center gap-1 py-1"
-          >
-            <span class="h-2 w-2 animate-bounce rounded-full bg-primary-400" style="animation-delay: 0ms" />
-            <span class="h-2 w-2 animate-bounce rounded-full bg-primary-400" style="animation-delay: 150ms" />
-            <span class="h-2 w-2 animate-bounce rounded-full bg-primary-400" style="animation-delay: 300ms" />
+          <div class="overflow-hidden">
+            <div class="border-t border-line px-3 pb-2 pt-1">
+              <RagPipelineSimple :steps="message.ragSteps!" />
+            </div>
           </div>
         </div>
-        <div
-          v-if="chatStore.streamError"
-          class="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2"
+      </div>
+
+      <!-- 正文 -->
+      <div
+        v-if="renderedContent"
+        ref="bodyRef"
+        class="markdown-body"
+        :class="{ 'is-streaming': isStreaming }"
+        v-html="renderedContent"
+        @click="handleContentClick"
+      />
+
+      <!-- 等待首个 token -->
+      <div v-else-if="isStreaming" class="flex items-center gap-1.5 py-2">
+        <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-faint" style="animation-delay: 0ms" />
+        <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-faint" style="animation-delay: 150ms" />
+        <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-faint" style="animation-delay: 300ms" />
+      </div>
+
+      <!-- 操作栏 -->
+      <div
+        v-if="!isStreaming && message.content"
+        class="mt-3 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/turn:opacity-100"
+      >
+        <button class="inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] text-muted transition-colors hover:bg-surface hover:text-ink" @click="copyContent">
+          <Check v-if="copied" :size="12" class="text-ok" />
+          <Copy v-else :size="12" />
+          复制
+        </button>
+        <button class="inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] text-muted transition-colors hover:bg-surface hover:text-ink">
+          <RotateCw :size="12" />
+          重新生成
+        </button>
+        <button class="inline-flex h-7 items-center justify-center rounded-full px-2.5 text-muted transition-colors hover:bg-surface hover:text-ink" title="有帮助">
+          <ThumbsUp :size="12" />
+        </button>
+
+        <button
+          v-if="message.citations?.length"
+          class="ml-auto inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] text-muted transition-colors hover:bg-surface hover:text-ink"
+          @click="emit('show-citation-list')"
         >
-          <AlertCircle :size="14" class="mt-0.5 shrink-0 text-red-400" />
-          <p class="text-xs text-red-600 leading-relaxed">{{ chatStore.streamError }}</p>
-        </div>
-        <CitationSummary
-          v-if="message.citations && message.citations.length && !isStreaming"
-          :citations="message.citations"
-          @select-citation="(cite) => emit('citation-click', cite)"
-        />
+          <BookOpen :size="12" />
+          参考文献 {{ message.citations.length }}
+        </button>
+      </div>
+
+      <!-- 错误 -->
+      <div
+        v-if="chatStore.streamError"
+        class="mt-3 flex items-start gap-2 rounded-lg border border-line bg-danger-soft px-3 py-2"
+      >
+        <AlertCircle :size="13" class="mt-0.5 shrink-0 text-danger" />
+        <p class="text-[12px] leading-relaxed text-danger">{{ chatStore.streamError }}</p>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-@keyframes breathe {
-  0%, 100% {
-    border-color: #93c5fd;
-    box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.1), 0 2px 4px -2px rgba(59, 130, 246, 0.1);
-  }
-  50% {
-    border-color: #60a5fa;
-    box-shadow: 0 4px 14px -1px rgba(59, 130, 246, 0.25), 0 2px 8px -2px rgba(59, 130, 246, 0.15);
-  }
-}
-
-.animate-breathe {
-  animation: breathe 2s ease-in-out infinite;
-}
-</style>

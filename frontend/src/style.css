@@ -1,239 +1,258 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Noto+Sans+SC:wght@100..900&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-
+/* ── Base ──────────────────────────────────────────────────── */
 @layer base {
-  * {
-    @apply border-slate-200;
+  html {
+    font-family: var(--font-sans);
   }
 
   body {
-    @apply bg-slate-50 text-slate-900;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
   }
 
-  /* Custom scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+  /* 暗色补偿：同样的字重，白字在深底上视觉会「发胖」。
+     降一档（350）抵消；若字体是静态字重，浏览器会就近取 400，无副作用。 */
+  html.dark body {
+    font-weight: 350;
   }
 
-  ::-webkit-scrollbar-track {
-    @apply bg-transparent;
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--accent-text);
   }
 
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    @apply bg-slate-300 rounded-full;
+    background: var(--border-strong);
+    border-radius: 8px;
+    border: 3px solid var(--bg);
   }
+  ::-webkit-scrollbar-thumb:hover { background: var(--faint); }
 
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-slate-400;
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 }
 
+/* ── Markdown 正文（v-html 渲染）────────────────────────────── */
 @layer components {
-  /* Markdown rendered content styles */
-  .markdown-body h1 {
-    @apply text-2xl font-bold mb-4 mt-6;
+  .markdown-body {
+    font-size: 15px;
+    line-height: 1.78;
+    color: var(--text);
+    overflow-wrap: break-word;
+    /* 避免最后一行只剩一两个字的孤字（Chrome 117+ / Safari 17.4+） */
+    text-wrap: pretty;
   }
 
-  .markdown-body h2 {
-    @apply text-xl font-semibold mb-3 mt-5;
+  /* 暗色下标题/加粗同步降一档，保持层级但不糊成一片 */
+  html.dark .markdown-body strong,
+  html.dark .markdown-body h1,
+  html.dark .markdown-body h2,
+  html.dark .markdown-body h3,
+  html.dark .markdown-body h4 {
+    font-weight: 550;
   }
 
-  .markdown-body h3 {
-    @apply text-lg font-semibold mb-2 mt-4;
-  }
+  .markdown-body > *:first-child { margin-top: 0; }
+  .markdown-body > *:last-child { margin-bottom: 0; }
 
-  .markdown-body p {
-    @apply mb-3 leading-relaxed;
-  }
+  .markdown-body h1 { font-size: 22px; font-weight: 600; margin: 28px 0 12px; }
+  .markdown-body h2 { font-size: 19px; font-weight: 600; margin: 26px 0 10px; }
+  .markdown-body h3 { font-size: 15.5px; font-weight: 600; margin: 24px 0 8px; letter-spacing: .1px; }
+  .markdown-body h4 { font-size: 14.5px; font-weight: 600; margin: 20px 0 6px; }
+
+  .markdown-body p { margin: 0 0 14px; }
+  .markdown-body strong { font-weight: 600; color: var(--text); }
+  .markdown-body em { font-style: italic; }
 
   .markdown-body ul,
-  .markdown-body ol {
-    @apply mb-3 pl-6;
-  }
-
-  .markdown-body ul {
-    @apply list-disc;
-  }
-
-  .markdown-body ol {
-    @apply list-decimal;
-  }
-
-  .markdown-body li {
-    @apply mb-1;
-  }
+  .markdown-body ol { margin: 0 0 14px; padding-left: 22px; }
+  .markdown-body ul { list-style: disc; }
+  .markdown-body ol { list-style: decimal; }
+  .markdown-body li { margin: 5px 0; }
+  .markdown-body li::marker { color: var(--faint); }
 
   .markdown-body code {
-    @apply bg-slate-100 text-primary-700 px-1.5 py-0.5 rounded text-sm font-mono;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    background: var(--surface);
+    color: var(--text-2);
+    padding: 1.5px 5px;
+    border-radius: var(--r-xs);
   }
 
   .markdown-body pre {
-    @apply my-4 rounded-xl overflow-hidden;
+    margin: 16px 0;
+    border-radius: var(--r-md);
+    overflow: hidden;
+    border: 1px solid var(--border);
   }
 
   .markdown-body pre code {
-    @apply bg-transparent text-slate-100 p-4 block text-sm leading-relaxed;
+    display: block;
+    padding: 14px 16px;
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 12.5px;
+    line-height: 1.7;
+    overflow-x: auto;
   }
 
   .markdown-body blockquote {
-    @apply border-l-4 border-primary-400 pl-4 py-2 my-3 bg-primary-50/50 rounded-r-lg italic text-slate-600;
+    margin: 16px 0;
+    padding: 2px 0 2px 13px;
+    border-left: 3px solid var(--border-strong);
+    color: var(--muted);
+    font-size: 14px;
   }
 
   .markdown-body table {
-    @apply w-full border-collapse my-4;
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 13.5px;
   }
-
   .markdown-body th {
-    @apply bg-slate-100 text-left px-4 py-2 font-semibold border-b-2 border-slate-200;
+    text-align: left;
+    font-weight: 600;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-strong);
   }
-
   .markdown-body td {
-    @apply px-4 py-2 border-b border-slate-100;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
   }
 
   .markdown-body a {
-    @apply text-primary-600 underline hover:text-primary-700;
+    color: var(--accent-text);
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .markdown-body hr {
-    @apply my-6 border-slate-200;
+    margin: 24px 0;
+    border: 0;
+    border-top: 1px solid var(--border);
   }
 
-  .markdown-body strong {
-    @apply font-semibold text-slate-900;
-  }
+  .markdown-body img { max-width: 100%; border-radius: var(--r-md); }
 
+  /* markdown-it-container 自定义块 */
   .markdown-body .md-container {
-    @apply my-4 rounded-xl border px-4 py-3 text-sm leading-relaxed;
+    margin: 16px 0;
+    padding: 12px 14px;
+    border-radius: var(--r-md);
+    border: 1px solid var(--border);
+    font-size: 13.5px;
+    line-height: 1.7;
   }
-
-  .markdown-body .md-container-tip {
-    @apply border-blue-200 bg-blue-50 text-blue-800;
-  }
-
-  .markdown-body .md-container-tip::before {
-    content: '💡 提示: ';
-    font-weight: 600;
-  }
-
-  .markdown-body .md-container-warning {
-    @apply border-amber-200 bg-amber-50 text-amber-800;
-  }
-
-  .markdown-body .md-container-warning::before {
-    content: '⚠️ 注意: ';
-    font-weight: 600;
-  }
-
-  .markdown-body .md-container-info {
-    @apply border-primary-200 bg-primary-50 text-primary-800;
-  }
-
-  .markdown-body .md-container-info::before {
-    content: 'ℹ️ 信息: ';
-    font-weight: 600;
-  }
-
+  .markdown-body .md-container-tip { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+  .markdown-body .md-container-tip::before { content: '提示 · '; font-weight: 600; }
+  .markdown-body .md-container-warning { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
+  .markdown-body .md-container-warning::before { content: '注意 · '; font-weight: 600; }
+  .markdown-body .md-container-info { border-color: var(--border-strong); background: var(--surface); color: var(--text-2); }
+  .markdown-body .md-container-info::before { content: '信息 · '; font-weight: 600; }
 }
 
-/* Transition classes */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-.slide-enter-active,
-.slide-leave-active {
-  transition: transform 0.3s ease, opacity 0.3s ease;
-}
-
-.slide-enter-from {
-  transform: translateX(-20px);
-  opacity: 0;
-}
-
-.slide-leave-to {
-  transform: translateX(-20px);
-  opacity: 0;
-}
-
-/* Citation tag in markdown body */
+/* ── 引用标记（正文内的 [1] [2]）────────────────────────────── */
 .citation-tag {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background-color: #dbeafe;
-  color: #1d4ed8;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin: 0 1px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent-text);
   font-size: 11px;
   font-weight: 600;
-  padding: 0 6px;
-  margin: 0 2px;
-  border-radius: 4px;
-  border: 1px solid #93c5fd;
-  vertical-align: baseline;
+  line-height: 1;
+  vertical-align: 1.5px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
 
 .citation-tag:hover {
-  background-color: #2563eb;
-  color: #ffffff;
-  border-color: #2563eb;
+  background: var(--accent);
+  color: #fff;
   transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
 }
 
 /*
- * 流式输出期间关掉 .citation-tag 的过渡。
- *
- * 原因：正文用 v-html 渲染整段 markdown，而流式每 ~100ms 就重算一次 → innerHTML 整体替换
- * → 每个 .citation-tag 都是新 DOM 节点，:hover 状态随之丢失。此时若还开着
- * `transition: all 0.15s`，每次重建都会从默认浅蓝重新过渡，动画永远走不完 → 闪烁。
- * 直接落终态（无过渡）后视觉稳定；流式结束后恢复正常过渡。
+ * 流式期间关闭过渡：正文用 v-html 渲染，每 tick 整体替换 innerHTML，
+ * 每个 .citation-tag 都是新节点、:hover 丢失；过渡比重建周期长就走不完 → 闪烁。
  */
 .is-streaming .citation-tag,
 .is-streaming .citation-tag:hover {
   transition: none;
 }
 
-/* ── Message bubble enter ── */
-.msg-enter-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
+/* ── 过渡动画 ─────────────────────────────────────────────── */
+.fade-enter-active,
+.fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from,
+.fade-leave-to { opacity: 0; }
 
-.msg-enter-from {
-  opacity: 0;
-  transform: translateY(12px);
-}
+.slide-enter-active,
+.slide-leave-active { transition: transform 0.28s var(--ease), opacity 0.28s var(--ease); }
+.slide-enter-from,
+.slide-leave-to { transform: translateX(-16px); opacity: 0; }
 
-/* ── Right panel slide ── */
+/* 消息入场：8px 上移 + 淡入（Gemini 的克制感来自小位移） */
+.msg-enter-active { transition: opacity 0.3s var(--ease), transform 0.3s var(--ease); }
+.msg-enter-from { opacity: 0; transform: translateY(8px); }
+.msg-leave-active { transition: opacity 0.15s ease; }
+.msg-leave-to { opacity: 0; }
+
+/* 右侧面板：从右滑入 */
 .panel-enter-active,
-.panel-leave-active {
-  transition: transform 0.25s ease, opacity 0.25s ease;
-}
-
+.panel-leave-active { transition: transform 0.28s var(--ease); }
 .panel-enter-from,
-.panel-leave-to {
-  transform: translateX(20px);
-  opacity: 0;
+.panel-leave-to { transform: translateX(100%); }
+
+/* ── 流式逐字「晕开」──────────────────────────────────────── */
+/* 每个新出现的字：blur(6px) → 清晰，90ms；行内相邻字由 JS 错开 30ms */
+@keyframes char-in {
+  from { opacity: 0; filter: blur(6px); }
+  to   { opacity: 1; filter: blur(0); }
 }
 
-/* ── Float animation for empty state icon ── */
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
+.char-in {
+  display: inline;
+  animation: char-in 90ms cubic-bezier(0.215, 0.61, 0.355, 1) both;
+  will-change: filter, opacity;
 }
 
-.animate-float {
-  animation: float 3s ease-in-out infinite;
+/* ── 微交互：欠阻尼微弹（约弹簧 380/18）──────────────────── */
+/* 用在点赞、对勾、发送等"点了要有回应"的地方 */
+.spring-soft {
+  transition-timing-function: var(--ease-spring-soft);
+}
+
+/* ── 骨架屏 ───────────────────────────────────────────────── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 37%, var(--surface) 63%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: var(--r-sm);
 }

@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { Stethoscope, Eye, EyeOff, LogIn } from 'lucide-vue-next'
+import { Eye, EyeOff, ArrowRight, AlertCircle } from 'lucide-vue-next'
 
 const username = ref('')
 const password = ref('')
@@ -37,76 +37,71 @@ function handleKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-100 via-white to-primary-50 px-4">
-    <!-- Login Card -->
-    <div class="w-full max-w-md">
-      <!-- Logo -->
-      <div class="mb-8 text-center">
-        <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-600 to-sky-500 shadow-lg">
-          <Stethoscope :size="28" class="text-white" />
+  <div class="flex min-h-screen items-center justify-center bg-canvas px-5">
+    <div class="w-full max-w-[400px]">
+      <!-- 品牌 -->
+      <div class="mb-9 text-center">
+        <div
+          class="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-xl text-[15px] font-bold text-white shadow-[0_4px_16px_rgba(66,133,244,.35)]"
+          style="background: linear-gradient(100deg, var(--grad-1), var(--grad-2), var(--grad-3))"
+        >
+          M
         </div>
-        <h1 class="text-2xl font-bold tracking-tight text-slate-900">
-          MedRAG
-        </h1>
-        <p class="mt-1.5 text-sm text-slate-500">
-          医学文献可视化 RAG 辅助问答系统
-        </p>
+        <h1 class="text-[26px] font-semibold tracking-[-.4px]">MedRAG</h1>
+        <p class="mt-1 text-[13.5px] text-muted">医学文献智能问答</p>
       </div>
 
-      <!-- Form -->
-      <div class="rounded-2xl border bg-white/80 backdrop-blur-xl p-8 shadow-sm">
-        <div class="mb-6">
-          <label class="mb-1.5 block text-sm font-medium text-slate-700">
-            用户名
-          </label>
+      <div class="rounded-2xl border border-line bg-surface-2 p-7">
+        <label class="mb-1.5 block text-[12.5px] font-medium text-ink-2">用户名</label>
+        <input
+          v-model="username"
+          type="text"
+          placeholder="输入用户名"
+          class="mb-4 w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[14px] text-ink placeholder:text-faint outline-none transition-colors focus:border-accent focus:bg-canvas"
+          @keydown="handleKeydown"
+        />
+
+        <label class="mb-1.5 block text-[12.5px] font-medium text-ink-2">密码</label>
+        <div class="relative mb-2">
           <input
-            v-model="username"
-            type="text"
-            placeholder="输入用户名 (admin 为管理员)"
-            class="w-full rounded-xl border bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none transition-all focus:border-primary-400 focus:bg-white focus:ring-2 focus:ring-primary-100"
+            v-model="password"
+            :type="showPassword ? 'text' : 'password'"
+            placeholder="输入密码"
+            class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 pr-10 text-[14px] text-ink placeholder:text-faint outline-none transition-colors focus:border-accent focus:bg-canvas"
             @keydown="handleKeydown"
           />
+          <button
+            class="absolute right-2.5 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-faint transition-colors hover:bg-hover hover:text-ink"
+            @click="showPassword = !showPassword"
+          >
+            <EyeOff v-if="showPassword" :size="15" />
+            <Eye v-else :size="15" />
+          </button>
         </div>
 
-        <div class="mb-2">
-          <label class="mb-1.5 block text-sm font-medium text-slate-700">
-            密码
-          </label>
-          <div class="relative">
-            <input
-              v-model="password"
-              :type="showPassword ? 'text' : 'password'"
-              placeholder="输入密码"
-              class="w-full rounded-xl border bg-slate-50 px-4 py-2.5 pr-10 text-sm text-slate-900 placeholder-slate-400 outline-none transition-all focus:border-primary-400 focus:bg-white focus:ring-2 focus:ring-primary-100"
-              @keydown="handleKeydown"
-            />
-            <button
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              @click="showPassword = !showPassword"
-            >
-              <EyeOff v-if="showPassword" :size="16" />
-              <Eye v-else :size="16" />
-            </button>
-          </div>
-        </div>
-
-        <p v-if="error" class="mb-4 text-sm text-red-500">{{ error }}</p>
+        <p v-if="error" class="mt-3 flex items-center gap-1.5 text-[12.5px] text-danger">
+          <AlertCircle :size="13" />
+          {{ error }}
+        </p>
 
         <button
           :disabled="isLoading"
-          class="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
+          class="mt-6 flex w-full items-center justify-center gap-1.5 rounded-full bg-accent px-4 py-2.5 text-[14px] font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
           @click="handleLogin"
         >
-          <LogIn :size="16" />
-          <span v-if="!isLoading">登录</span>
-          <span v-else>登录中...</span>
+          {{ isLoading ? '登录中…' : '登录' }}
+          <ArrowRight v-if="!isLoading" :size="15" />
         </button>
 
-        <p class="mt-4 text-center text-xs text-slate-400">
+        <p class="mt-5 text-center text-[12.5px] text-muted">
           没有账号？
-          <router-link to="/register" class="text-primary-600 hover:text-primary-700 transition-colors">立即注册</router-link>
+          <router-link to="/register" class="text-accent-text hover:underline">立即注册</router-link>
         </p>
       </div>
+
+      <p class="mt-6 text-center text-[11px] text-faint">
+        基于 1,248 篇中文医学文献 · 回答附原文出处
+      </p>
     </div>
   </div>
 </template>

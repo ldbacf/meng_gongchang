@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { registerApi } from '@/api/auth'
 import { useToastStore } from '@/stores/toast'
-import { Stethoscope, Eye, EyeOff, UserPlus } from 'lucide-vue-next'
+import { Eye, EyeOff, ArrowRight, AlertCircle } from 'lucide-vue-next'
 
 const username = ref('')
 const password = ref('')
@@ -50,91 +50,83 @@ function handleKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-100 via-white to-primary-50 px-4">
-    <div class="w-full max-w-md">
-      <!-- Logo -->
+  <div class="flex min-h-screen items-center justify-center bg-canvas px-5 py-10">
+    <div class="w-full max-w-[400px]">
+      <!-- 品牌 -->
       <div class="mb-8 text-center">
-        <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-600 to-sky-500 shadow-lg">
-          <Stethoscope :size="28" class="text-white" />
+        <div
+          class="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-xl text-[15px] font-bold text-white shadow-[0_4px_16px_rgba(66,133,244,.35)]"
+          style="background: linear-gradient(100deg, var(--grad-1), var(--grad-2), var(--grad-3))"
+        >
+          M
         </div>
-        <h1 class="text-2xl font-bold tracking-tight text-slate-900">MedRAG</h1>
-        <p class="mt-1.5 text-sm text-slate-500">注册新账号</p>
+        <h1 class="text-[26px] font-semibold tracking-[-.4px]">创建账号</h1>
+        <p class="mt-1 text-[13.5px] text-muted">注册后需管理员审核通过才能登录</p>
       </div>
 
-      <!-- Form Card -->
-      <div class="rounded-2xl border bg-white/80 backdrop-blur-xl p-8 shadow-sm">
-        <!-- Username -->
-        <div class="mb-5">
-          <label class="mb-1.5 block text-sm font-medium text-slate-700">用户名</label>
+      <div class="rounded-2xl border border-line bg-surface-2 p-7">
+        <label class="mb-1.5 block text-[12.5px] font-medium text-ink-2">用户名</label>
+        <input
+          v-model="username"
+          type="text"
+          placeholder="3-20 位字母、数字、下划线"
+          class="mb-4 w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[14px] text-ink placeholder:text-faint outline-none transition-colors focus:border-accent focus:bg-canvas"
+          @keydown="handleKeydown"
+        />
+
+        <label class="mb-1.5 block text-[12.5px] font-medium text-ink-2">密码</label>
+        <div class="relative mb-4">
           <input
-            v-model="username"
-            type="text"
-            placeholder="3-20 位字母、数字、下划线"
-            class="w-full rounded-xl border bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none transition-all focus:border-primary-400 focus:bg-white focus:ring-2 focus:ring-primary-100"
+            v-model="password"
+            :type="showPassword ? 'text' : 'password'"
+            placeholder="6-50 位"
+            class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 pr-10 text-[14px] text-ink placeholder:text-faint outline-none transition-colors focus:border-accent focus:bg-canvas"
             @keydown="handleKeydown"
           />
+          <button
+            class="absolute right-2.5 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-faint transition-colors hover:bg-hover hover:text-ink"
+            @click="showPassword = !showPassword"
+          >
+            <EyeOff v-if="showPassword" :size="15" />
+            <Eye v-else :size="15" />
+          </button>
         </div>
 
-        <!-- Password -->
-        <div class="mb-5">
-          <label class="mb-1.5 block text-sm font-medium text-slate-700">密码</label>
-          <div class="relative">
-            <input
-              v-model="password"
-              :type="showPassword ? 'text' : 'password'"
-              placeholder="6-50 位"
-              class="w-full rounded-xl border bg-slate-50 px-4 py-2.5 pr-10 text-sm text-slate-900 placeholder-slate-400 outline-none transition-all focus:border-primary-400 focus:bg-white focus:ring-2 focus:ring-primary-100"
-              @keydown="handleKeydown"
-            />
-            <button
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              @click="showPassword = !showPassword"
-            >
-              <EyeOff v-if="showPassword" :size="16" />
-              <Eye v-else :size="16" />
-            </button>
-          </div>
+        <label class="mb-1.5 block text-[12.5px] font-medium text-ink-2">确认密码</label>
+        <div class="relative mb-2">
+          <input
+            v-model="confirmPassword"
+            :type="showConfirm ? 'text' : 'password'"
+            placeholder="再次输入密码"
+            class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 pr-10 text-[14px] text-ink placeholder:text-faint outline-none transition-colors focus:border-accent focus:bg-canvas"
+            @keydown="handleKeydown"
+          />
+          <button
+            class="absolute right-2.5 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-faint transition-colors hover:bg-hover hover:text-ink"
+            @click="showConfirm = !showConfirm"
+          >
+            <EyeOff v-if="showConfirm" :size="15" />
+            <Eye v-else :size="15" />
+          </button>
         </div>
 
-        <!-- Confirm Password -->
-        <div class="mb-2">
-          <label class="mb-1.5 block text-sm font-medium text-slate-700">确认密码</label>
-          <div class="relative">
-            <input
-              v-model="confirmPassword"
-              :type="showConfirm ? 'text' : 'password'"
-              placeholder="再次输入密码"
-              class="w-full rounded-xl border bg-slate-50 px-4 py-2.5 pr-10 text-sm text-slate-900 placeholder-slate-400 outline-none transition-all focus:border-primary-400 focus:bg-white focus:ring-2 focus:ring-primary-100"
-              @keydown="handleKeydown"
-            />
-            <button
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              @click="showConfirm = !showConfirm"
-            >
-              <EyeOff v-if="showConfirm" :size="16" />
-              <Eye v-else :size="16" />
-            </button>
-          </div>
-        </div>
+        <p v-if="error" class="mt-3 flex items-center gap-1.5 text-[12.5px] text-danger">
+          <AlertCircle :size="13" />
+          {{ error }}
+        </p>
 
-        <!-- Error -->
-        <p v-if="error" class="text-sm text-red-500">{{ error }}</p>
-
-        <!-- Submit -->
         <button
           :disabled="isLoading"
-          class="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
+          class="mt-6 flex w-full items-center justify-center gap-1.5 rounded-full bg-accent px-4 py-2.5 text-[14px] font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
           @click="handleRegister"
         >
-          <UserPlus :size="16" />
-          <span v-if="!isLoading">注册</span>
-          <span v-else>注册中...</span>
+          {{ isLoading ? '注册中…' : '注册' }}
+          <ArrowRight v-if="!isLoading" :size="15" />
         </button>
 
-        <!-- Login link -->
-        <p class="mt-4 text-center text-xs text-slate-400">
+        <p class="mt-5 text-center text-[12.5px] text-muted">
           已有账号？
-          <router-link to="/login" class="text-primary-600 hover:text-primary-700 transition-colors">返回登录</router-link>
+          <router-link to="/login" class="text-accent-text hover:underline">返回登录</router-link>
         </p>
       </div>
     </div>
