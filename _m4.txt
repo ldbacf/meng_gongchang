@@ -1,0 +1,30 @@
+修复步骤勾选态丢失 + 流式回答不能跨会话继续
+
+## 1. 完成的步骤显示成空心圈、点不开
+后端 `build_rag_step` 写入的状态是 **`"done"`**（SSE 的 `s` 字段也是 `"done"`），
+而前端只认 `"completed"`：
+
+- 实时流式：store 里把 `s === 'done'` 映射成 `'completed'` → 正常
+- 但消息落库后回放（切走再切回、刷新页面、历史会话）拿到的是原始 `"done"`
+  → `status === 'completed'` 为 false → 既没有勾选态，`toggle()` 也直接 return
+  → 表现为空心圈、无法展开
+
+修法：`isDone()` 同时接受 `'completed'` 和 `'done'`，并把 `RagStep.status`
+类型补上 `'done' | 'failed'`。不动后端契约（`"done"` 本来就是它声明的值）。
+
+## 2. 生成中切换会话，回来进行中的回答就没了
+`ChatView` 的 route watcher 里调了 `abortStreaming()` —— 一切会话就掐断 SSE。
+
+改为：切换会话**不打断**生成，并给流式状态打上归属：
+
+- store 新增 `streamingConversationId`，`startStreaming()` 时记录当前会话
+- ChatView 新增 `showStreaming`：只有「当前会话 === 正在生成的会话」才渲染流式气泡
+  → 切到别的对话时那条气泡不会串进去，切回来还能看到它继续跑
+- 生成结束时如果用户已经切走，**不把消息塞进别人的 messages**
+  （persist 节点已落库，切回来由 `selectConversation` 拉取）
+- 同步 URL 的 watcher 加守卫，不再因为"流式结束"把用户从别的会话拽回去
+
+中止路径（点停止 / 卸载）也一并清空 `streamingConversationId`，避免残留归属。
+
+实测（用后端真实的 `status: "done"` 构造数据）：四步全部显示绿色勾选，
+完成态默认折叠，点开可见摘要与指标。

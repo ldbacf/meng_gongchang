@@ -9,6 +9,14 @@ export const useChatStore = defineStore('chat', () => {
   const currentConversationId = ref<string | null>(null)
   const messages = ref<Message[]>([])
   const isStreaming = ref(false)
+  /**
+   * 正在流式回答的是哪个会话。
+   *
+   * 允许用户切走再切回来：SSE 继续跑；消息区只在「当前会话 === 正在生成的会话」
+   * 时才渲染那条流式气泡。生成结束时若用户已切到别的会话，就不往 messages 里塞，
+   * 等他切回来由服务端拉取（后端已落库）。
+   */
+  const streamingConversationId = ref<string | null>(null)
   const streamContent = ref('')
   const streamCitations = ref<Citation[]>([])
   const streamRagSteps = ref<RagSteps>({})
@@ -106,6 +114,7 @@ export const useChatStore = defineStore('chat', () => {
     _pendingFinish = null
     streamComplete.value = false
     isStreaming.value = true
+    streamingConversationId.value = currentConversationId.value
     streamContent.value = ''
     streamCitations.value = []
     streamRagSteps.value = {}
@@ -143,9 +152,14 @@ export const useChatStore = defineStore('chat', () => {
       ragSteps: ragSteps ?? undefined,
       timestamp: Date.now(),
     }
-    messages.value.push(msg)
+    // 用户可能已经切到别的会话：此时不要把这条消息塞进别人的 messages，
+    // 切回来时由 selectConversation 从服务端拉（persist 节点已落库）。
+    if (streamingConversationId.value === currentConversationId.value) {
+      messages.value.push(msg)
+    }
 
     isStreaming.value = false
+    streamingConversationId.value = null
     streamContent.value = ''
     streamCitations.value = []
     streamRagSteps.value = {}
@@ -210,6 +224,7 @@ export const useChatStore = defineStore('chat', () => {
         _stopReveal()
         streamError.value = msg.message
         isStreaming.value = false
+        streamingConversationId.value = null
         break
     }
   }
@@ -248,6 +263,7 @@ export const useChatStore = defineStore('chat', () => {
     currentConversationId,
     messages,
     isStreaming,
+    streamingConversationId,
     streamContent,
     streamCitations,
     streamRagSteps,
