@@ -1,26 +1,22 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
-import { Send } from 'lucide-vue-next'
+import { ArrowUp, Square, Paperclip } from 'lucide-vue-next'
 
 const text = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
-const emit = defineEmits<{ send: [content: string] }>()
+const emit = defineEmits<{ send: [content: string]; stop: [] }>()
 
-defineProps<{ disabled?: boolean }>()
+const props = defineProps<{ disabled?: boolean; streaming?: boolean }>()
 
 function autoResize() {
   const el = textareaRef.value
   if (!el) return
-  el.rows = 1
-  const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
-  const maxRows = 6
-  const maxHeight = lineHeight * maxRows
   el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
-  el.rows = Math.min(maxRows, Math.max(1, Math.floor(el.scrollHeight / lineHeight)))
+  el.style.height = Math.min(el.scrollHeight, 180) + 'px'
 }
 
 async function handleSend() {
+  if (props.streaming) return
   const content = text.value.trim()
   if (!content) return
   emit('send', content)
@@ -38,34 +34,61 @@ function handleKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="border-t bg-white/60 px-4 py-4 backdrop-blur-xl">
-    <div class="flex justify-center">
-      <div class="w-full max-w-3xl">
+  <div class="px-6 pb-4 pt-1">
+    <div class="mx-auto w-full max-w-chat">
+      <!-- 聚焦不用 outline：加一圈 1px 强调色 + 3px 柔和外环，形成"咬合"的双环 -->
       <div
-        class="flex items-center gap-3 rounded-2xl border border-slate-200/60 bg-white/70 px-4 py-3 shadow-sm backdrop-blur-sm transition-all duration-200 focus-within:border-primary-300 focus-within:bg-white/90 focus-within:shadow-md focus-within:ring-2 focus-within:ring-primary-100"
+        class="rounded-[28px] border border-line bg-surface-2 transition-[border-color,box-shadow] duration-200 ease-[cubic-bezier(.215,.61,.355,1)] focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--accent-soft),0_0_0_1px_var(--accent)]"
       >
-        <textarea
-          ref="textareaRef"
-          v-model="text"
-          :disabled="disabled"
-          rows="1"
-          placeholder="输入您的医学问题..."
-          class="max-h-36 min-h-[24px] flex-1 resize-none border-0 bg-transparent p-0 text-sm text-slate-900 placeholder-slate-400 outline-none disabled:opacity-50"
-          @keydown="handleKeydown"
-          @input="autoResize"
-        />
-        <button
-          :disabled="disabled || !text.trim()"
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-600 text-white shadow-sm transition-all hover:bg-primary-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
-          @click="handleSend"
-        >
-          <Send :size="16" />
-        </button>
+        <div class="flex items-end gap-2 py-2 pl-3.5 pr-2">
+          <button
+            class="mb-1 grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-surface hover:text-ink"
+            title="添加附件"
+          >
+            <Paperclip :size="17" />
+          </button>
+
+          <textarea
+            ref="textareaRef"
+            v-model="text"
+            rows="1"
+            :disabled="disabled || streaming"
+            placeholder="向 MedRAG 提问，例如：高血压初始治疗怎么选药？"
+            class="max-h-[180px] min-h-[24px] flex-1 resize-none border-0 bg-transparent py-2.5 text-[15px] leading-normal text-ink placeholder:text-faint outline-none disabled:opacity-60"
+            @keydown="handleKeydown"
+            @input="autoResize"
+          />
+
+          <button
+            v-if="streaming"
+            class="mb-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink text-canvas transition-transform active:scale-95"
+            title="停止生成"
+            @click="emit('stop')"
+          >
+            <Square :size="14" fill="currentColor" />
+          </button>
+          <button
+            v-else
+            :disabled="disabled || !text.trim()"
+            class="mb-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-white shadow-[0_2px_8px_rgba(26,115,232,.35)] transition-[background-color,transform] duration-200 ease-[cubic-bezier(.34,1.56,.64,1)] hover:bg-accent-hover active:scale-90 disabled:bg-surface disabled:text-faint disabled:shadow-none"
+            title="发送"
+            @click="handleSend"
+          >
+            <ArrowUp :size="17" />
+          </button>
+        </div>
+
+        <div class="flex items-center gap-2 px-4 pb-2.5 text-[11px] text-faint">
+          <kbd class="rounded border border-line bg-surface px-1.5 py-px font-mono text-[10.5px]">Enter</kbd>
+          发送
+          <kbd class="rounded border border-line bg-surface px-1.5 py-px font-mono text-[10.5px]">Shift + Enter</kbd>
+          换行
+        </div>
       </div>
-      <p class="mt-2 text-center text-xs text-slate-400">
-        MedRAG 可能产生不准确信息，请核对引文来源。Enter 发送，Shift+Enter 换行。
+
+      <p class="mt-2.5 text-center text-[11px] text-faint">
+        回答基于文献原文，仅供临床参考；模型可能出错，请核对出处。
       </p>
-    </div>
     </div>
   </div>
 </template>

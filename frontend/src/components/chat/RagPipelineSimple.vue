@@ -1,409 +1,309 @@
 <script setup lang="ts">
-import type { RagSteps, RagStep, IntentMetrics, RetrievalMetrics, FusionMetrics, AnswerMetrics } from '@/types'
-import { ref, computed, watch, nextTick } from 'vue'
-import {
-  ChevronRight, Search, Network, BarChart4, ShieldCheck,
-  Clock, AlertTriangle, ArrowRight,
-} from 'lucide-vue-next'
+import type { RagSteps, RagStep } from '@/types'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { ChevronDown } from 'lucide-vue-next'
 
-const props = defineProps<{
-  steps: RagSteps
-}>()
+const props = defineProps<{ steps: RagSteps }>()
 
-const expandedSteps = ref<Record<string, boolean>>({
-  intent: false,
-  retrieval: false,
-  fusion: false,
-  answer: false,
-})
+const DEFS = [
+  { key: 'intent', label: '意图识别', sub: 'Query Rewriting' },
+  { key: 'retrieval', label: '混合检索', sub: 'Hybrid Search' },
+  { key: 'fusion', label: '融合重排', sub: 'Reranking' },
+  { key: 'answer', label: '生成回答', sub: 'Answer' },
+] as const
 
-watch(
-  () => props.steps,
-  async (newSteps) => {
-    if (!newSteps) return
-    for (const [key, step] of Object.entries(newSteps)) {
-      if (step && step.status === 'pending') {
-        expandedSteps.value[key] = true
-        await nextTick()
-        const el = document.getElementById(`rag-step-${key}`)
-        el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-      }
-    }
-  },
-  { deep: true },
-)
+type StepKey = (typeof DEFS)[number]['key']
 
-function toggleStep(key: string) {
-  expandedSteps.value[key] = !expandedSteps.value[key]
-}
-
-function getStep(key: string): RagStep | undefined {
+function get(key: StepKey): RagStep | undefined {
   return (props.steps as Record<string, RagStep | undefined>)[key]
 }
 
-// ── Intent helpers ──
+/**
+ * 只渲染**已经出现**的步骤。
+ *
+ * 后端按顺序发 step 事件（intent pending → done → retrieval pending …），
+ * 所以"第 3、4 步还不存在"这件事天然成立，不需要额外的时间线代码。
+ */
+const rows = computed(() =>
+  DEFS.filter((d) => get(d.key)).map((d) => ({ ...d, step: get(d.key) as RagStep })),
+)
 
-function coverageColor(cov: string): string {
-  switch (cov) {
-    case 'high': return 'text-emerald-600 bg-emerald-50'
-    case 'medium': return 'text-amber-600 bg-amber-50'
-    case 'low': return 'text-orange-600 bg-orange-50'
-    default: return 'text-red-600 bg-red-50'
+// ── 运行中的耗时与未判定进度 ──
+
+const startAt = ref<Record<string, number>>({})
+const now = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | undefined
+
+watch(
+  () => props.steps,
+  (s) => {
+    for (const d of DEFS) {
+      if (s[d.key] && !startAt.value[d.key]) startAt.value[d.key] = Date.now()
+    }
+    const anyPending = rows.value.some((r) => r.step.status === 'pending')
+    if (anyPending && !ticker) {
+      ticker = setInterval(() => { now.value = Date.now() }, 100)
+    } else if (!anyPending && ticker) {
+      clearInterval(ticker)
+      ticker = undefined
+    }
+  },
+  { deep: true, immediate: true },
+)
+
+onBeforeUnmount(() => { if (ticker) clearInterval(ticker) })
+
+function elapsed(key: StepKey): string {
+  const step = get(key)
+  if (!step) return ''
+  if (step.elapsed_ms) return `${(step.elapsed_ms / 1000).toFixed(1)}s`
+  if (step.status === 'pending') {
+    const t0 = startAt.value[key]
+    if (!t0) return '0.0s'
+    return `${((now.value - t0) / 1000).toFixed(1)}s`
   }
+  return ''
 }
 
-function coverageLabel(cov: string): string {
-  switch (cov) {
-    case 'high': return '高覆盖'
-    case 'medium': return '中覆盖'
-    case 'low': return '低覆盖'
-    case 'out_of_domain': return '无覆盖'
-    default: return ''
+// ── 展开：默认折叠，点开才看过程 ──
+
+const openKeys = ref<Set<string>>(new Set())
+const populated = ref<Set<string>>(new Set())
+const typed = ref<Record<string, string>>({})
+const timers = new Map<string, ReturnType<typeof setInterval>>()
+
+function isOpen(key: string): boolean {
+  return openKeys.value.has(key)
+}
+
+function toggle(key: StepKey) {
+  const step = get(key)
+  if (!step || step.status !== 'completed') return
+
+  const next = new Set(openKeys.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+    if (!populated.value.has(key)) {
+      populated.value = new Set(populated.value).add(key)
+      typeSummary(key, step.summary ?? '')
+    }
   }
+  openKeys.value = next
 }
 
-// ── Retrieval helpers ──
-
-function routingLabel(routing: string): string {
-  switch (routing) {
-    case 'both': return '双路召回'
-    case 'milvus_only': return '仅向量检索'
-    case 'es_only': return '仅全文检索'
-    default: return routing
-  }
+/** 摘要逐字打出（只在首次展开时跑一次） */
+function typeSummary(key: string, text: string) {
+  if (!text) { typed.value[key] = ''; return }
+  let i = 1
+  // 先落第一个字，避免展开瞬间出现空白框
+  typed.value[key] = text.slice(0, 1)
+  const timer = setInterval(() => {
+    i++
+    typed.value[key] = text.slice(0, i)
+    if (i >= text.length) {
+      clearInterval(timer)
+      timers.delete(key)
+    }
+  }, 24)
+  timers.set(key, timer)
 }
 
-// ── Fusion helpers ──
+onBeforeUnmount(() => {
+  timers.forEach((t) => clearInterval(t))
+  timers.clear()
+})
 
-function scoreLabel(score: number): string {
-  if (score >= 0.9) return '最优'
-  if (score >= 0.75) return '优秀'
-  if (score >= 0.6) return '相关'
-  return '一般'
+// ── metrics 渲染 ──
+
+/** 缩写保持大写：es → ES、md5 → MD5 */
+const ACRONYMS: Record<string, string> = {
+  es: 'ES', md5: 'MD5', api: 'API', url: 'URL', id: 'ID', kb: 'KB', llm: 'LLM',
 }
 
-function scoreLabelColor(score: number): string {
-  if (score >= 0.9) return 'text-emerald-600'
-  if (score >= 0.75) return 'text-emerald-500'
-  if (score >= 0.6) return 'text-amber-500'
-  return 'text-slate-400'
+function prettyKey(k: string): string {
+  return k
+    .split('_')
+    .map((w) => ACRONYMS[w.toLowerCase()] ?? w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
 }
 
-// ── Step list ──
-
-const stepList = computed(() => [
-  {
-    key: 'intent',
-    icon: Search,
-    colorClass: 'text-blue-600 bg-blue-50 border-blue-200',
-    dotClass: 'bg-blue-400',
-    lineClass: 'border-blue-200',
-    label: '意图识别',
-    sublabel: 'Query Rewriting',
-  },
-  {
-    key: 'retrieval',
-    icon: Network,
-    colorClass: 'text-purple-600 bg-purple-50 border-purple-200',
-    dotClass: 'bg-purple-400',
-    lineClass: 'border-purple-200',
-    label: '混合检索',
-    sublabel: 'Hybrid Search',
-  },
-  {
-    key: 'fusion',
-    icon: BarChart4,
-    colorClass: 'text-amber-600 bg-amber-50 border-amber-200',
-    dotClass: 'bg-amber-400',
-    lineClass: 'border-amber-200',
-    label: '融合重排',
-    sublabel: 'Reranking',
-  },
-  {
-    key: 'answer',
-    icon: ShieldCheck,
-    colorClass: 'text-emerald-600 bg-emerald-50 border-emerald-200',
-    dotClass: 'bg-emerald-400',
-    lineClass: 'border-emerald-200',
-    label: '生成回答',
-    sublabel: 'Answer Generation',
-  },
-])
+function metricEntries(key: StepKey): { k: string; v: string }[] {
+  const m = get(key)?.metrics as Record<string, unknown> | undefined
+  if (!m) return []
+  return Object.entries(m)
+    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .map(([k, v]) => {
+      let text: string
+      if (Array.isArray(v)) text = v.length > 4 ? `${v.slice(0, 4).join(', ')} …（共 ${v.length}）` : v.join(', ')
+      else if (typeof v === 'object') text = JSON.stringify(v)
+      else if (typeof v === 'number') text = Number.isInteger(v) ? String(v) : v.toFixed(3)
+      else text = String(v)
+      return { k: prettyKey(k), v: text }
+    })
+}
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-    <div class="px-4 py-3">
-      <div class="relative pl-6">
-        <!-- Timeline line -->
-        <div class="absolute left-[5px] top-2 bottom-2 w-px bg-slate-200" />
-
-        <template v-for="(item, idx) in stepList" :key="item.key">
-          <div
-            v-if="getStep(item.key)"
-            :id="`rag-step-${item.key}`"
-            class="relative"
-            :class="{ 'mb-3': idx < stepList.length - 1 }"
+  <div class="py-0.5">
+    <!-- 每个步骤包一层 slot：出现时高度从 0 长开 -->
+    <div v-for="r in rows" :key="r.key" class="step-slot">
+      <div class="step">
+        <button
+          class="row group/row"
+          :class="{ 'is-clickable': r.step.status === 'completed' }"
+          @click="toggle(r.key)"
+        >
+          <!-- 状态点 -->
+          <span
+            class="grid h-[15px] w-[15px] shrink-0 place-items-center rounded-full border transition-colors duration-300"
+            :class="{
+              'border-ok bg-ok': r.step.status === 'completed',
+              'border-accent border-t-transparent animate-spin': r.step.status === 'pending',
+            }"
           >
-            <!-- Dot -->
-            <div class="absolute left-[-19px] top-1.5 z-10">
-              <div
-                v-if="getStep(item.key)?.status === 'completed'"
-                class="flex h-[11px] w-[11px] items-center justify-center rounded-full border"
-                :class="item.colorClass"
-              >
-                <div class="h-[5px] w-[5px] rounded-full" :class="item.dotClass" />
-              </div>
-              <span
-                v-else
-                class="block h-[11px] w-[11px] rounded-full animate-pulse"
-                :class="item.dotClass"
-              />
-            </div>
+            <svg
+              v-if="r.step.status === 'completed'"
+              class="dot-check"
+              width="8" height="8" viewBox="0 0 24 24" fill="none"
+              stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"
+            ><path d="m4 12 5 5L20 6" /></svg>
+          </span>
 
-            <!-- Header row -->
-            <button
-              class="flex w-full items-center gap-2 text-left"
-              @click="toggleStep(item.key)"
-            >
-              <span class="text-xs font-medium text-slate-700">{{ item.label }}</span>
-              <span class="text-[11px] text-slate-400">{{ item.sublabel }}</span>
-              <span
-                v-if="getStep(item.key)?.elapsed_ms"
-                class="ml-auto mr-1 inline-flex items-center gap-0.5 text-[10px] text-slate-400"
-              >
-                <Clock :size="10" />
-                {{ getStep(item.key)!.elapsed_ms! < 1000
-                  ? `${getStep(item.key)!.elapsed_ms}ms`
-                  : `${(getStep(item.key)!.elapsed_ms! / 1000).toFixed(1)}s` }}
-              </span>
-              <component
-                :is="item.icon"
-                :size="13"
-                class="shrink-0"
-                :class="getStep(item.key)?.status === 'completed' ? item.colorClass.split(' ')[0] : 'text-slate-300'"
-              />
-              <ChevronRight
-                :size="12"
-                class="text-slate-300 transition-transform duration-150 shrink-0"
-                :class="{ 'rotate-90': expandedSteps[item.key] }"
-              />
-            </button>
+          <span class="text-[12.5px] font-medium" :class="r.step.status === 'completed' ? 'text-ink-2' : 'text-ink'">
+            {{ r.label }}
+          </span>
+          <span class="text-[11.5px] text-faint">{{ r.sub }}</span>
 
-            <!-- Expanded content -->
-            <div
-              v-if="expandedSteps[item.key] && getStep(item.key)"
-              class="v-collapse"
-              :class="item.lineClass"
-            >
-              <div class="mt-1.5 rounded-md border px-3 py-2.5" :class="item.lineClass">
+          <span class="ml-auto shrink-0 font-mono text-[11.5px] tabular-nums text-faint">
+            {{ elapsed(r.key) }}
+          </span>
 
-              <!-- ── Intent step ── -->
-              <template v-if="item.key === 'intent' && getStep(item.key)!.metrics">
-                <div class="flex flex-wrap items-center gap-1.5 mb-2">
-                  <span
-                    v-if="(getStep(item.key)!.metrics as IntentMetrics).coverage !== 'unknown'"
-                    class="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold border"
-                    :class="coverageColor((getStep(item.key)!.metrics as IntentMetrics).coverage)"
-                  >
-                    {{ (getStep(item.key)!.metrics as IntentMetrics).coverage === 'high' ? '●' : '○' }}
-                    {{ coverageLabel((getStep(item.key)!.metrics as IntentMetrics).coverage) }}
-                  </span>
-                  <span class="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 border border-blue-200">
-                    {{ (getStep(item.key)!.metrics as IntentMetrics).domain }}
-                  </span>
-                </div>
-                <p class="text-[11px] text-slate-500 leading-relaxed mb-1.5">
-                  检索词：
-                  <span class="font-medium text-slate-700">{{ (getStep(item.key)!.metrics as IntentMetrics).rewritten_query }}</span>
-                </p>
-                <div v-if="(getStep(item.key)!.metrics as IntentMetrics).keywords?.length" class="flex flex-wrap gap-1 mb-1">
-                  <span
-                    v-for="kw in (getStep(item.key)!.metrics as IntentMetrics).keywords"
-                    :key="kw"
-                    class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500"
-                  >#{{ kw }}</span>
-                </div>
+          <ChevronDown
+            v-if="r.step.status === 'completed'"
+            :size="12"
+            class="shrink-0 text-faint transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)]"
+            :class="{ 'rotate-180': isOpen(r.key) }"
+          />
+          <span v-else class="w-3 shrink-0" />
+        </button>
+
+        <!-- 运行中：不定长扫光条（后端没有百分比） -->
+        <div v-if="r.step.status === 'pending'" class="sweep-bar">
+          <i />
+        </div>
+
+        <!-- 明细：grid 0fr → 1fr -->
+        <div
+          class="grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(.215,.61,.355,1)]"
+          :style="{ gridTemplateRows: isOpen(r.key) ? '1fr' : '0fr' }"
+        >
+          <div class="overflow-hidden">
+            <div class="mb-1.5 ml-[22px] mt-1 rounded-md border border-line bg-canvas px-3 py-2.5">
+              <p v-if="typed[r.key] || r.step.summary" class="mb-2 text-[12px] leading-relaxed text-ink-2">
+                {{ typed[r.key] || r.step.summary }}
+              </p>
+
+              <div v-if="metricEntries(r.key).length" class="grid grid-cols-2 gap-x-5 gap-y-0.5">
                 <div
-                  v-if="(getStep(item.key)!.metrics as IntentMetrics).suggestion"
-                  class="mt-1.5 flex items-start gap-1.5 rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5"
+                  v-for="(e, i) in metricEntries(r.key)"
+                  :key="e.k"
+                  class="metric-row flex items-baseline justify-between gap-2 border-b border-line py-0.5 text-[11px]"
+                  :style="{ animationDelay: `${i * 80}ms` }"
                 >
-                  <AlertTriangle :size="11" class="text-amber-500 mt-0.5 shrink-0" />
-                  <span class="text-[10px] text-amber-700 leading-relaxed">{{ (getStep(item.key)!.metrics as IntentMetrics).suggestion }}</span>
+                  <span class="shrink-0 text-faint">{{ e.k }}</span>
+                  <span class="truncate font-mono tabular-nums text-ink-2" :title="e.v">{{ e.v }}</span>
                 </div>
-              </template>
-
-              <!-- ── Retrieval step ── -->
-              <template v-if="item.key === 'retrieval' && getStep(item.key)!.metrics">
-                <!-- Two-column source cards -->
-                <div class="grid grid-cols-2 gap-3 mb-3">
-                  <!-- Milvus -->
-                  <div class="rounded-lg bg-purple-50/40 border border-purple-100 px-3 py-2">
-                    <div class="text-[10px] text-purple-500 font-medium mb-0.5">向量检索 · Milvus</div>
-                    <div class="text-2xl font-bold text-purple-600 leading-none mb-1.5">
-                      {{ (getStep(item.key)!.metrics as RetrievalMetrics).milvus_hits }}
-                    </div>
-                    <div class="space-y-0.5">
-                      <div
-                        v-for="(doc, di) in (getStep(item.key)!.metrics as RetrievalMetrics).milvus_top_docs"
-                        :key="'mv-' + di"
-                        class="text-[10px] text-slate-500 truncate leading-relaxed"
-                      >
-                        <span class="text-slate-300 mr-0.5">·</span>{{ doc.title }}
-                      </div>
-                      <div
-                        v-if="!(getStep(item.key)!.metrics as RetrievalMetrics).milvus_top_docs?.length"
-                        class="text-[10px] text-slate-300 italic"
-                      >无匹配结果</div>
-                    </div>
-                  </div>
-                  <!-- ES -->
-                  <div class="rounded-lg bg-amber-50/40 border border-amber-100 px-3 py-2">
-                    <div class="text-[10px] text-amber-500 font-medium mb-0.5">全文检索 · ES</div>
-                    <div class="text-2xl font-bold text-amber-600 leading-none mb-1.5">
-                      {{ (getStep(item.key)!.metrics as RetrievalMetrics).es_hits }}
-                    </div>
-                    <div class="space-y-0.5">
-                      <div
-                        v-for="(doc, di) in (getStep(item.key)!.metrics as RetrievalMetrics).es_top_docs"
-                        :key="'es-' + di"
-                        class="text-[10px] text-slate-500 truncate leading-relaxed"
-                      >
-                        <span class="text-slate-300 mr-0.5">·</span>{{ doc.title }}
-                      </div>
-                      <div
-                        v-if="!(getStep(item.key)!.metrics as RetrievalMetrics).es_top_docs?.length"
-                        class="text-[10px] text-slate-300 italic"
-                      >无匹配结果</div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Divider -->
-                <div class="border-t border-slate-200 mb-2" />
-
-                <!-- RRF merge result -->
-                <div class="flex items-center justify-between mb-1">
-                  <span class="text-[11px] text-slate-500">RRF 融合去重</span>
-                  <span class="text-sm font-bold text-slate-700">
-                    {{ (getStep(item.key)!.metrics as RetrievalMetrics).after_dedup }} 条
-                  </span>
-                </div>
-                <div class="text-[10px] text-slate-400 mb-2">
-                  重叠 {{ (getStep(item.key)!.metrics as RetrievalMetrics).overlap }} 条
-                </div>
-
-                <!-- Routing badge -->
-                <div class="text-center">
-                  <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">
-                    {{ routingLabel((getStep(item.key)!.metrics as RetrievalMetrics).routing) }}
-                  </span>
-                </div>
-              </template>
-
-              <!-- ── Fusion step ── -->
-              <template v-if="item.key === 'fusion' && getStep(item.key)!.metrics">
-                <div class="flex items-center justify-center gap-2 mb-3">
-                  <span class="text-[10px] text-slate-500">{{ (getStep(item.key)!.metrics as FusionMetrics).input_count }} 条</span>
-                  <ArrowRight :size="12" class="text-slate-300" />
-                  <span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                    Top-{{ (getStep(item.key)!.metrics as FusionMetrics).output_count }}
-                  </span>
-                </div>
-                <p class="text-[10px] text-slate-400 text-center mb-2">
-                  {{ (getStep(item.key)!.metrics as FusionMetrics).model }}
-                </p>
-                <!-- Score bars -->
-                <div
-                  v-if="(getStep(item.key)!.metrics as FusionMetrics).top_scores?.length"
-                  class="space-y-1.5"
-                >
-                  <div
-                    v-for="(score, si) in (getStep(item.key)!.metrics as FusionMetrics).top_scores"
-                    :key="si"
-                    class="flex items-center gap-1.5"
-                  >
-                    <span class="text-[9px] text-slate-400 w-4 text-right">#{{ si + 1 }}</span>
-                    <div class="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        class="h-full rounded-full bg-gradient-to-r from-emerald-400 via-emerald-300 to-amber-300 transition-all duration-500 ease-out"
-                        :style="{ width: `${Math.max((score * 100), 2)}%` }"
-                      />
-                    </div>
-                    <span class="text-[9px] font-mono text-slate-500 w-8">{{ (score * 100).toFixed(0) }}%</span>
-                    <span class="text-[9px] w-5" :class="scoreLabelColor(score)">{{ scoreLabel(score) }}</span>
-                  </div>
-                </div>
-              </template>
-
-              <!-- ── Answer step ── -->
-              <!-- Pending: summary + shimmer bar -->
-              <template v-if="item.key === 'answer' && getStep(item.key)!.status === 'pending' && !getStep(item.key)!.metrics">
-                <p class="text-xs text-slate-500 text-center mb-2 animate-pulse">
-                  {{ getStep(item.key)!.summary || '正在生成回答...' }}
-                </p>
-                <div class="h-1 bg-slate-100 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full shimmer-bar w-1/2" />
-                </div>
-              </template>
-              <!-- Completed: full metrics -->
-              <template v-if="item.key === 'answer' && getStep(item.key)!.metrics">
-                <div class="flex items-center justify-center gap-2 mb-1.5">
-                  <span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-                    {{ (getStep(item.key)!.metrics as AnswerMetrics).model }}
-                  </span>
-                  <span class="text-[9px] text-slate-400">
-                    片段 ×{{ (getStep(item.key)!.metrics as AnswerMetrics).context_chunks }}
-                  </span>
-                </div>
-                <div class="flex justify-center gap-3 text-[10px] text-slate-400">
-                  <span>Token: {{ (getStep(item.key)!.metrics as AnswerMetrics).total_tokens }}</span>
-                  <span v-if="(getStep(item.key)!.metrics as AnswerMetrics).total_elapsed_ms">
-                    总耗时:
-                    <span class="font-medium text-slate-600">
-                      {{ ((getStep(item.key)!.metrics as AnswerMetrics).total_elapsed_ms / 1000).toFixed(1) }}s
-                    </span>
-                  </span>
-                </div>
-              </template>
-
-              <!-- Generic fallback: pending step (non-answer) -->
-              <!-- 不要求 summary：pending 帧本就不带 summary，若必须存在则该分支恒不显示，
-                   展开后是一块空白。这里给默认文案，pending 总有可见反馈。 -->
-              <template
-                v-if="
-                  item.key !== 'answer' &&
-                  getStep(item.key)!.status === 'pending' &&
-                  !getStep(item.key)!.metrics
-                "
-              >
-                <p class="text-xs text-slate-500 text-center animate-pulse">
-                  {{ getStep(item.key)!.summary || '处理中...' }}
-                </p>
-              </template>
-
               </div>
+
+              <p v-else-if="!r.step.summary" class="text-[11.5px] text-faint">该步骤暂无明细</p>
             </div>
           </div>
-        </template>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.v-collapse {
+/* 步骤出现：高度从 0 长开 + 轻微上移淡入 */
+.step-slot {
+  animation: slot-in 0.36s var(--ease-out) both;
+}
+
+@keyframes slot-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin: -2px -6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.row.is-clickable { cursor: pointer; }
+.row.is-clickable:hover { background: var(--surface); }
+
+/* 勾选弹入（欠阻尼微弹） */
+.dot-check {
+  animation: check-pop 0.4s var(--ease-spring-soft) both;
+}
+
+@keyframes check-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* 运行中的不定长扫光 */
+.sweep-bar {
+  position: relative;
+  height: 2px;
+  margin: 3px 0 4px 24px;
+  border-radius: 2px;
+  background: var(--line);
   overflow: hidden;
-  transition: max-height 0.3s ease, opacity 0.2s ease;
 }
 
-@keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(200%); }
+.sweep-bar > i {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: sweep-x 1.5s var(--ease) infinite;
 }
 
-.shimmer-bar {
-  background: linear-gradient(90deg, transparent 0%, #34d399 50%, transparent 100%);
-  animation: shimmer 2s ease-in-out infinite;
+@keyframes sweep-x {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(310%); }
+}
+
+/* 指标错开浮现 */
+.metric-row {
+  opacity: 0;
+  filter: blur(4px);
+  animation: metric-in 0.42s var(--ease-out) forwards;
+}
+
+@keyframes metric-in {
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
 }
 </style>

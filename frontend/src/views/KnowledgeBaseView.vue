@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAdminStore } from '@/stores/admin'
 import { useToastStore } from '@/stores/toast'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { Plus, BookOpen, Trash2, ShieldCheck, ArrowRight } from 'lucide-vue-next'
+import { Plus, BookOpen, Trash2, ArrowRight, Lock, Check } from 'lucide-vue-next'
 
 const adminStore = useAdminStore()
 const toastStore = useToastStore()
@@ -24,6 +24,10 @@ const creating = ref(false)
 onMounted(() => {
   adminStore.fetchKnowledgeBases()
 })
+
+const totalDocs = computed(() =>
+  adminStore.knowledgeBases.reduce((n, kb) => n + (kb.document_count ?? 0), 0),
+)
 
 function openCreate() {
   newName.value = ''
@@ -66,155 +70,164 @@ function goToKB(kbId: string) {
 
 <template>
   <AppLayout>
-    <div class="flex h-full flex-col">
-      <!-- Header -->
-      <div class="flex items-center justify-between border-b px-6 py-4">
-        <div>
-          <h1 class="text-lg font-semibold text-slate-800">知识库管理</h1>
-          <p class="text-sm text-slate-500">管理多个医学文献知识库，每个知识库独立存储与检索</p>
+    <div class="flex h-full flex-col overflow-hidden">
+      <!-- 页头 -->
+      <div class="border-b border-line px-8 pb-5 pt-2">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h1 class="text-[22px] font-semibold tracking-[-.3px]">知识库管理</h1>
+            <p class="mt-1 text-[13px] text-muted">
+              每个知识库独立建索引与检索；共
+              <b class="font-semibold text-ink-2">{{ adminStore.knowledgeBases.length }}</b> 个库 ·
+              <b class="font-semibold text-ink-2">{{ totalDocs }}</b> 篇文献
+            </p>
+          </div>
+          <button
+            class="flex shrink-0 items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover"
+            @click="openCreate"
+          >
+            <Plus :size="15" />
+            新建知识库
+          </button>
         </div>
-        <button
-          class="flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 active:scale-[0.98] transition-colors shadow-sm"
-          @click="openCreate"
-        >
-          <Plus :size="16" />
-          新建知识库
-        </button>
       </div>
 
-      <!-- KB Card Grid -->
-      <div class="flex-1 overflow-y-auto p-6">
-        <div v-if="adminStore.kbLoading" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div v-for="i in 3" :key="i" class="animate-pulse rounded-xl border bg-white p-5">
-            <div class="h-5 w-32 rounded bg-slate-200 mb-3" />
-            <div class="h-3 w-full rounded bg-slate-100 mb-2" />
-            <div class="h-3 w-3/4 rounded bg-slate-100" />
+      <!-- 卡片网格 -->
+      <div class="flex-1 overflow-y-auto px-8 py-5">
+        <!-- 骨架 -->
+        <div v-if="adminStore.kbLoading" class="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+          <div v-for="i in 3" :key="i" class="rounded-xl border border-line bg-surface-2 p-5">
+            <div class="skeleton mb-3 h-4 w-28" />
+            <div class="skeleton mb-2 h-3 w-full" />
+            <div class="skeleton h-3 w-3/4" />
           </div>
         </div>
 
-        <div v-else-if="adminStore.knowledgeBases.length === 0" class="flex flex-col items-center justify-center py-20 text-slate-400">
-          <BookOpen :size="48" class="mb-4" />
-          <p class="text-sm">暂无知识库</p>
-          <p class="text-xs mt-1">点击"新建知识库"创建第一个文献库</p>
+        <!-- 空 -->
+        <div
+          v-else-if="adminStore.knowledgeBases.length === 0"
+          class="flex flex-col items-center justify-center py-24 text-faint"
+        >
+          <BookOpen :size="34" class="mb-3 opacity-60" />
+          <p class="text-[13px]">暂无知识库</p>
+          <p class="mt-1 text-[12px]">点击「新建知识库」创建第一个文献库</p>
         </div>
 
-        <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <!-- 列表 -->
+        <div v-else class="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
           <div
             v-for="kb in adminStore.knowledgeBases"
             :key="kb.id"
-            class="group relative rounded-xl border bg-white p-5 shadow-sm transition-all hover:shadow-md cursor-pointer"
+            class="group relative cursor-pointer rounded-xl border border-line bg-surface-2 p-4 transition-all hover:border-line-strong hover:shadow-sm"
+            :class="{ 'border-accent': adminStore.activeKbId === kb.id }"
             @click="goToKB(kb.id)"
           >
-            <!-- KB card content -->
             <div class="flex items-start gap-3">
-              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-50">
-                <BookOpen :size="18" class="text-primary-600" />
+              <div class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-soft">
+                <BookOpen :size="17" class="text-accent-text" />
               </div>
-              <div class="flex-1 min-w-0">
+              <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
-                  <h3 class="text-sm font-semibold text-slate-800 truncate">{{ kb.name }}</h3>
+                  <h3 class="truncate text-[13.5px] font-semibold">{{ kb.name }}</h3>
                   <span
                     v-if="kb.slug === 'zhong_guo_quan_ke'"
-                    class="inline-flex shrink-0 items-center rounded-full bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 border border-primary-200"
+                    class="shrink-0 rounded-full bg-accent-soft px-1.5 py-px text-[10px] font-medium text-accent-text"
                   >默认</span>
-                  <ShieldCheck
-                    v-if="kb.has_ready_docs"
-                    :size="13"
-                    class="shrink-0 text-emerald-500"
-                    title="已有就绪文档"
-                  />
+                  <Lock v-if="kb.has_ready_docs" :size="11" class="shrink-0 text-faint" title="已有就绪文档" />
                 </div>
-                <p class="mt-1 text-xs text-slate-500 line-clamp-2">{{ kb.description || '暂无描述' }}</p>
+                <p class="mt-1 line-clamp-2 text-[12px] leading-relaxed text-muted">
+                  {{ kb.description || '暂无描述' }}
+                </p>
               </div>
             </div>
 
-            <!-- Footer -->
-            <div class="mt-4 flex items-center justify-between border-t pt-3">
-              <div class="flex items-center gap-3 text-xs text-slate-400">
-                <span>{{ kb.document_count }} 篇文献</span>
-                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
-                  :class="kb.has_ready_docs ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'"
+            <div class="mt-3.5 flex items-center justify-between border-t border-line pt-3">
+              <div class="flex items-center gap-2 text-[11.5px] text-faint">
+                <span>{{ kb.document_count }} 篇</span>
+                <span
+                  class="rounded-full px-2 py-0.5 text-[10.5px] font-medium"
+                  :class="kb.has_ready_docs ? 'bg-ok-soft text-ok' : 'bg-warn-soft text-warn'"
                 >
                   {{ kb.has_ready_docs ? '只读' : '可上传' }}
                 </span>
               </div>
+
               <div class="flex items-center gap-1">
-                <button
-                  v-if="adminStore.activeKbId !== kb.id"
-                  class="inline-flex items-center gap-1 rounded-lg border border-primary-200 bg-primary-50 px-2.5 py-1 text-[11px] font-medium text-primary-600 opacity-0 group-hover:opacity-100 hover:bg-primary-100 transition-all shrink-0"
-                  @click.stop="activateKb(kb)"
-                >启用此知识库</button>
                 <span
+                  v-if="adminStore.activeKbId === kb.id"
+                  class="inline-flex items-center gap-1 rounded-full bg-ok-soft px-2 py-0.5 text-[10.5px] font-medium text-ok"
+                >
+                  <Check :size="10" />
+                  使用中
+                </span>
+                <button
                   v-else
-                  class="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-600 shrink-0"
-                >当前使用中 ✓</span>
+                  class="rounded-full border border-line px-2.5 py-0.5 text-[10.5px] font-medium text-ink-2 opacity-0 transition-all hover:bg-surface group-hover:opacity-100"
+                  @click.stop="activateKb(kb)"
+                >启用</button>
+
                 <button
                   v-if="kb.slug !== 'zhong_guo_quan_ke'"
-                  class="flex h-7 w-7 items-center justify-center rounded text-slate-300 opacity-0 hover:bg-red-50 hover:text-red-500 transition-all group-hover:opacity-100"
+                  class="grid h-6 w-6 place-items-center rounded-full text-faint opacity-0 transition-all hover:bg-danger-soft hover:text-danger group-hover:opacity-100"
+                  title="删除"
                   @click.stop="handleDelete(kb.id)"
                 >
-                  <Trash2 :size="14" />
+                  <Trash2 :size="12" />
                 </button>
-                <ArrowRight :size="14" class="text-slate-300 opacity-0 group-hover:opacity-100 transition-all" />
+                <ArrowRight :size="13" class="text-faint opacity-0 transition-all group-hover:opacity-100" />
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Create Modal -->
+      <!-- 新建弹窗 -->
       <Teleport to="body">
         <Transition name="fade">
           <div
             v-if="showCreateModal"
-            class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4"
             @click.self="showCreateModal = false"
           >
-            <div class="w-full max-w-md rounded-2xl border bg-white p-6 shadow-xl">
-              <h2 class="text-lg font-semibold text-slate-800 mb-4">新建知识库</h2>
+            <div class="w-full max-w-[440px] rounded-2xl border border-line bg-surface-2 p-6 shadow-lg">
+              <h2 class="mb-5 text-[16px] font-semibold">新建知识库</h2>
 
-              <div class="mb-4">
-                <label class="mb-1.5 block text-sm font-medium text-slate-700">名称</label>
-                <input
-                  v-model="newName"
-                  placeholder="如：心血管专科文献库"
-                  class="w-full rounded-xl border bg-slate-50 px-3 py-2 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
-                  @keydown.enter="handleCreate"
-                />
-              </div>
+              <label class="mb-1.5 block text-[12.5px] font-medium text-ink-2">名称</label>
+              <input
+                v-model="newName"
+                placeholder="如：心血管专科文献库"
+                class="mb-4 w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[13.5px] outline-none transition-colors focus:border-accent focus:bg-canvas"
+                @keydown.enter="handleCreate"
+              />
 
-              <div class="mb-4">
-                <label class="mb-1.5 block text-sm font-medium text-slate-700">英文标识</label>
-                <input
-                  v-model="newSlug"
-                  placeholder="如：cardio（仅小写字母数字下划线）"
-                  class="w-full rounded-xl border bg-slate-50 px-3 py-2 text-sm font-mono outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
-                  @keydown.enter="handleCreate"
-                />
-                <p class="mt-1 text-[11px] text-slate-400">用于 ES 索引和 Milvus 集合命名</p>
-              </div>
+              <label class="mb-1.5 block text-[12.5px] font-medium text-ink-2">英文标识</label>
+              <input
+                v-model="newSlug"
+                placeholder="如：cardio"
+                class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 font-mono text-[13px] outline-none transition-colors focus:border-accent focus:bg-canvas"
+                @keydown.enter="handleCreate"
+              />
+              <p class="mb-4 mt-1.5 text-[11px] text-faint">用于 ES 索引与 Milvus 集合命名，仅小写字母、数字、下划线</p>
 
-              <div class="mb-6">
-                <label class="mb-1.5 block text-sm font-medium text-slate-700">描述（选填）</label>
-                <textarea
-                  v-model="newDesc"
-                  rows="2"
-                  placeholder="简要描述知识库内容..."
-                  class="w-full rounded-xl border bg-slate-50 px-3 py-2 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 resize-none"
-                />
-              </div>
+              <label class="mb-1.5 block text-[12.5px] font-medium text-ink-2">描述（选填）</label>
+              <textarea
+                v-model="newDesc"
+                rows="2"
+                placeholder="简要描述知识库内容…"
+                class="mb-6 w-full resize-none rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[13.5px] outline-none transition-colors focus:border-accent focus:bg-canvas"
+              />
 
-              <div class="flex justify-end gap-3">
+              <div class="flex justify-end gap-2">
                 <button
-                  class="rounded-lg px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 transition-colors"
+                  class="rounded-full px-4 py-2 text-[13px] text-muted transition-colors hover:bg-surface"
                   @click="showCreateModal = false"
                 >取消</button>
                 <button
                   :disabled="creating || !newName.trim() || !newSlug.trim()"
-                  class="rounded-lg bg-primary-600 px-5 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-40 transition-colors"
+                  class="rounded-full bg-accent px-5 py-2 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-40"
                   @click="handleCreate"
                 >
-                  {{ creating ? '创建中...' : '创建' }}
+                  {{ creating ? '创建中…' : '创建' }}
                 </button>
               </div>
             </div>

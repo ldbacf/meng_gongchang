@@ -9,9 +9,9 @@ import { useToastStore } from '@/stores/toast'
 import { useAdminStore } from '@/stores/admin'
 import ChatInput from './ChatInput.vue'
 import MessageBubble from './MessageBubble.vue'
-import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import EmptyState from './EmptyState.vue'
 import RightPanel from './RightPanel.vue'
-import { Sparkles, Library } from 'lucide-vue-next'
+import { Library } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -224,103 +224,85 @@ async function handleSend(content: string) {
 </script>
 
 <template>
-  <div class="flex h-full">
-    <!-- Left: Chat main -->
-    <div class="flex flex-1 flex-col overflow-hidden">
-      <!-- Messages Area -->
-      <div
-        ref="messagesContainer"
-        class="flex-1 overflow-y-auto"
-      >
-        <!-- Empty state -->
-        <div
-          v-if="!chatStore.currentConversationId && !chatStore.isStreaming"
-          class="flex h-full flex-col items-center justify-center px-4"
-        >
-          <div
-            class="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-sky-400 shadow-lg mb-6 animate-float"
-          >
-            <Sparkles :size="32" class="text-white" />
-          </div>
-          <h2 class="text-xl font-semibold text-slate-800 mb-2">
-            MedRAG 医学文献助手
-          </h2>
-          <p class="max-w-md text-center text-sm text-slate-500 leading-relaxed">
-            基于 RAG 技术的医学文献智能问答系统。点击左侧「发起新对话」开始提问，获取基于真实文献的精准回答。
-          </p>
-        </div>
-
-        <!-- Skeleton loading -->
-        <div v-if="messagesLoading" class="flex flex-col gap-3 px-4 py-4">
-          <div v-for="i in 3" :key="'sk-' + i" class="flex gap-3 animate-pulse">
-            <div class="h-8 w-8 shrink-0 rounded-full bg-slate-200" />
-            <div class="flex-1 space-y-2">
-              <div class="h-3 w-32 rounded bg-slate-200" />
-              <div class="h-3 w-full rounded bg-slate-100" />
-              <div class="h-3 w-3/4 rounded bg-slate-100" />
-            </div>
-          </div>
-        </div>
-
-        <!-- Messages -->
-        <TransitionGroup name="msg">
-          <template v-for="msg in chatStore.messages" :key="msg.id">
-            <MessageBubble
-              :message="msg"
-              @citation-click="handleCitationClick"
-              @show-citation-list="showCitationList"
-            />
-          </template>
-        </TransitionGroup>
-
-        <!-- Live streaming message -->
-        <div v-if="chatStore.isStreaming">
-          <MessageBubble
-            :message="streamMessageWithRagSteps"
-            :is-streaming="true"
-            :stream-content="chatStore.revealedContent"
-            @citation-click="handleCitationClick"
-            @show-citation-list="showCitationList"
-          />
-        </div>
-
-        <LoadingSpinner
-          v-if="chatStore.messages.length === 0 && chatStore.isStreaming"
-          text="正在思考..."
+  <div class="relative flex h-full overflow-hidden">
+    <div class="flex min-w-0 flex-1 flex-col">
+      <!-- 消息区 -->
+      <div ref="messagesContainer" class="flex-1 overflow-y-auto">
+        <!-- 空状态 -->
+        <EmptyState
+          v-if="!chatStore.currentConversationId && !chatStore.isStreaming && !messagesLoading"
+          @ask="handleSend"
         />
 
-      </div>
+        <!-- 会话内容 -->
+        <div v-else class="mx-auto w-full max-w-chat px-6 pb-8 pt-1">
+          <!-- 骨架 -->
+          <div v-if="messagesLoading" class="space-y-7 py-4">
+            <div v-for="i in 3" :key="'sk-' + i" class="flex gap-3.5">
+              <div class="skeleton h-[26px] w-[26px] shrink-0 rounded-full" />
+              <div class="flex-1 space-y-2.5">
+                <div class="skeleton h-3 w-2/5" />
+                <div class="skeleton h-3 w-full" />
+                <div class="skeleton h-3 w-4/5" />
+              </div>
+            </div>
+          </div>
 
-      <!-- Input -->
-      <!-- Active KB indicator -->
-      <div v-if="adminStore.activeKb" class="flex items-center justify-center border-t bg-white/50 px-4 py-1.5">
-        <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
-          <Library :size="12" class="text-primary-400" />
-          <span>当前知识库：</span>
-          <span class="font-medium text-slate-600">{{ adminStore.activeKb.name }}</span>
-          <span class="text-slate-300">—</span>
-          <span>在知识库管理中切换</span>
+          <template v-else>
+            <TransitionGroup name="msg">
+              <template v-for="msg in chatStore.messages" :key="msg.id">
+                <MessageBubble
+                  :message="msg"
+                  @citation-click="handleCitationClick"
+                  @show-citation-list="showCitationList"
+                />
+              </template>
+            </TransitionGroup>
+
+            <!-- 正在流式输出的消息 -->
+            <div v-if="chatStore.isStreaming">
+              <MessageBubble
+                :message="streamMessageWithRagSteps"
+                :is-streaming="true"
+                :stream-content="chatStore.revealedContent"
+                @citation-click="handleCitationClick"
+                @show-citation-list="showCitationList"
+              />
+            </div>
+          </template>
         </div>
       </div>
-      <ChatInput :disabled="chatStore.isStreaming" @send="handleSend" />
+
+      <!-- 当前知识库 -->
+      <div
+        v-if="adminStore.activeKb"
+        class="flex items-center justify-center gap-1.5 pb-1 text-[11px] text-faint"
+      >
+        <Library :size="11" />
+        当前知识库 · <span class="font-medium text-muted">{{ adminStore.activeKb.name }}</span>
+      </div>
+
+      <ChatInput
+        :streaming="chatStore.isStreaming"
+        @send="handleSend"
+        @stop="abortStreaming"
+      />
     </div>
 
-    <!-- Right: Citation panel -->
+    <!-- 右侧文献面板（覆盖式滑出） -->
     <Transition name="panel">
       <RightPanel
         v-if="rightPanelOpen"
         :citations="uniqueCitations"
-      :active-citation="activeCitation"
-      :pdf-url="pdfUrl"
-      :pdf-loading="pdfLoading"
-      :show-back-button="showBackButton"
-      :pdf-headers="pdfHeaders"
-      @close="closeRightPanel"
-      @back-to-list="goBackToList"
-      @select-citation="handlePanelSelectCitation"
+        :active-citation="activeCitation"
+        :pdf-url="pdfUrl"
+        :pdf-loading="pdfLoading"
+        :show-back-button="showBackButton"
+        :pdf-headers="pdfHeaders"
+        @close="closeRightPanel"
+        @back-to-list="goBackToList"
+        @select-citation="handlePanelSelectCitation"
       />
     </Transition>
   </div>
 </template>
-
-

@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RAG 步骤 · 渐进式动效原型</title>
+<style>
+/* ══════════════════════════════════════════════════════════
+   渐进式 RAG 步骤动效原型
+   ──────────────────────────────────────────────────────────
+   要解决的问题：现在的步骤是「一次性出现 + 瞬间变勾」，
+   没有"正在发生"的感知。这里把每一层都做成渐进：
+
+   1. 步骤逐个点亮：未开始的步骤是暗的，开始后才亮
+   2. 运行中有进度条（按真实耗时推进）+ 扫光
+   3. 耗时数字实时跳动（tabular-nums 防抖）
+   4. 完成后勾选弹入（欠阻尼弹簧）
+   5. 完成后摘要**逐字打出**
+   6. 指标行**错开浮现**（每条间隔 80ms，从 blur 到清晰）
+   7. 折叠区用 grid 0fr→1fr，随内容自动撑开
+   ══════════════════════════════════════════════════════════ */
+
+:root {
+  --font: "Google Sans Text", Inter, -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+
+  --bg: #1b1c1d;
+  --surface: #282a2c;
+  --surface-2: #1f2021;
+  --line: #3c4043;
+  --line-strong: #4a4d51;
+  --text: #e3e3e3;
+  --text-2: #d0d3d6;
+  --muted: #9aa0a6;
+  --faint: #7c8288;
+  --accent: #8ab4f8;
+  --accent-soft: #1e3050;
+  --accent-text: #a8c7fa;
+  --ok: #81c995;
+  --ok-soft: #1e3a29;
+
+  --ease-out: cubic-bezier(.215, .61, .355, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --ease-snappy: cubic-bezier(.22, 1, .36, 1);
+}
+
+html[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f0f4f9;
+  --surface-2: #ffffff;
+  --line: #e3e7eb;
+  --line-strong: #d3d9df;
+  --text: #1f1f1f;
+  --text-2: #444746;
+  --muted: #5f6368;
+  --faint: #8f959b;
+  --accent: #1a73e8;
+  --accent-soft: #e8f0fe;
+  --accent-text: #0b57d0;
+  --ok: #1e8e3e;
+  --ok-soft: #e6f4ea;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px 64px;
+  gap: 18px;
+  transition: background .25s, color .25s;
+}
+
+/* ── 控制条 ── */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.controls button {
+  font: inherit;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .18s var(--ease-spring);
+}
+.controls button:hover { border-color: var(--line-strong); }
+.controls button:active { transform: scale(.94); }
+.controls .hint { color: var(--faint); font-size: 11.5px; }
+
+/* ── 卡片 ── */
+.card {
+  width: min(760px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+/* ── 头部 ── */
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  overflow: hidden;
+}
+
+.spark {
+  width: 15px; height: 15px;
+  flex: 0 0 auto;
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+.spark svg { width: 13px; height: 13px; color: var(--faint); transition: color .3s; }
+.is-running .spark svg { color: var(--accent); animation: spark-pulse 1.6s var(--ease-out) infinite; }
+
+@keyframes spark-pulse {
+  0%, 100% { opacity: .55; transform: scale(.88); }
+  50%      { opacity: 1;   transform: scale(1.08); }
+}
+
+/* 运行中：标题文字做渐变扫光（渐进感的核心视觉之一） */
+.head-text {
+  font-weight: 500;
+  letter-spacing: .1px;
+  background: linear-gradient(100deg,
+    var(--muted) 0%, var(--muted) 38%,
+    var(--accent-text) 50%,
+    var(--muted) 62%, var(--muted) 100%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: sweep 2.4s linear infinite;
+}
+
+@keyframes sweep {
+  0%   { background-position: 130% 0; }
+  100% { background-position: -130% 0; }
+}
+
+.head-text.is-done {
+  animation: none;
+  background: none;
+  -webkit-text-fill-color: var(--muted);
+  color: var(--muted);
+}
+
+.head-total {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+/* ── 步骤列表 ── */
+.steps { padding: 6px 0 8px; }
+
+/* 每个步骤包一层 slot：用 grid 0fr→1fr 控制"是否已出现"，
+   高度自然增长，后面的步骤在轮到自己之前完全不存在于视觉里。 */
+.step-slot {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .38s var(--ease-out);
+}
+.step-slot.is-shown { grid-template-rows: 1fr; }
+.step-slot > .step { overflow: hidden; }
+
+.step {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  padding: 0 14px;
+  /* 入场：轻微上移 + 淡入，与高度增长同步 */
+  opacity: 0;
+  transform: translateY(5px);
+  transition: opacity .34s var(--ease-out), transform .34s var(--ease-out);
+}
+.step-slot.is-shown > .step { opacity: 1; transform: none; }
+
+/* 最后一个已出现的步骤，不画向下延伸的连接线 */
+.step-slot.is-last .rail::after,
+.step-slot.is-last .rail::before { display: none; }
+
+/* 左侧轨道：圆点 + 连接线 */
+.rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding-top: 11px;
+}
+
+.dot {
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  background: var(--surface-2);
+  position: relative;
+  z-index: 2;
+  transition: border-color .3s, background-color .3s, transform .35s var(--ease-spring);
+}
+
+/* 连接线：随步骤完成逐段点亮 */
+.rail::after {
+  content: '';
+  position: absolute;
+  top: 26px;
+  bottom: -2px;
+  width: 1.5px;
+  background: var(--line);
+  border-radius: 2px;
+}
+.step:last-child .rail::after { display: none; }
+
+.rail::before {
+  content: '';
+  position: absolute;
+  top: 26px;
+  bottom: -2px;
+  width: 1.5px;
+  background: var(--ok);
+  border-radius: 2px;
+  transform-origin: top;
+  transform: scaleY(0);
+  transition: transform .5s var(--ease-out);
+  z-index: 1;
+}
+.step.is-done .rail::before { transform: scaleY(1); }
+
+/* 运行中：圆点变成旋转环 */
+.step.is-running .dot {
+  border-color: var(--accent);
+  border-top-color: transparent;
+  animation: spin .75s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 完成：勾选弹入 */
+.step.is-done .dot {
+  border-color: var(--ok);
+  background: var(--ok);
+  animation: pop .42s var(--ease-spring) both;
+}
+.step.is-done .dot::after {
+  content: '';
+  position: absolute;
+  left: 3.5px; top: 5px;
+  width: 7px; height: 4px;
+  border-left: 1.6px solid #fff;
+  border-bottom: 1.6px solid #fff;
+  transform: rotate(-45deg);
+  animation: check-in .3s var(--ease-out) .05s both;
+}
+@keyframes pop {
+  0%   { transform: scale(.7); }
+  55%  { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes check-in {
+  from { opacity: 0; transform: rotate(-45deg) scale(.4); }
+  to   { opacity: 1; transform: rotate(-45deg) scale(1); }
+}
+
+/* 未开始：整行压暗 */
+.step:not(.is-running):not(.is-done) .label { color: var(--faint); }
+.step:not(.is-running):not(.is-done) .sub { color: var(--muted); }
+
+/* ── 右侧内容 ── */
+.body { min-width: 0; padding: 8px 0 10px; }
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 22px;
+  border-radius: 6px;
+  margin: -2px -6px;
+  padding: 2px 6px;
+  transition: background-color .15s;
+}
+
+/* 已完成的步骤才可点开（运行中/未开始不响应） */
+.step.is-done .row { cursor: pointer; }
+.step.is-done .row:hover { background: var(--surface); }
+
+.chev {
+  width: 13px; height: 13px;
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--faint);
+  opacity: 0;
+  transition: transform .32s var(--ease-out), opacity .2s;
+}
+.chev svg { width: 100%; height: 100%; display: block; }
+
+.step.is-done .chev { opacity: 1; }
+.step.is-expanded .chev { transform: rotate(180deg); }
+
+.label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: color .3s;
+}
+.step.is-running .label { color: var(--text); }
+
+.sub {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.time {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--faint);
+  opacity: 0;
+  transform: translateX(4px);
+  transition: opacity .3s var(--ease-out), transform .3s var(--ease-out);
+}
+.step.is-running .time,
+.step.is-done .time { opacity: 1; transform: none; }
+.step.is-done .time { color: var(--muted); }
+
+/* 进度条：只在运行中出现，宽度按真实耗时推进 */
+.bar {
+  height: 2px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+  margin: 7px 0 0;
+  opacity: 0;
+  transition: opacity .3s var(--ease-out);
+  position: relative;
+}
+.step.is-running .bar { opacity: 1; }
+.step.is-done .bar { opacity: 0; }
+
+.bar > i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width .1s linear;
+}
+
+/* 进度条上的扫光，制造"仍在推进"的呼吸感 */
+.bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(138,180,248,.55), transparent);
+  transform: translateX(-100%);
+  animation: bar-sweep 1.4s linear infinite;
+}
+@keyframes bar-sweep {
+  to { transform: translateX(100%); }
+}
+.step.is-done .bar::after { animation: none; }
+
+/* ── 明细区：grid 0fr → 1fr，内容撑开时高度自然过渡 ── */
+.detail {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .45s var(--ease-out), margin .45s var(--ease-out);
+  margin-top: 0;
+}
+.step.is-expanded .detail {
+  grid-template-rows: 1fr;
+  margin-top: 8px;
+}
+.detail > div { overflow: hidden; }
+
+.detail-inner {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 9px 11px;
+}
+
+/* 摘要逐字打出 */
+.summary {
+  margin: 0 0 7px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-2);
+  min-height: 0;
+}
+.summary:empty { display: none; }
+.summary .caret {
+  display: inline-block;
+  width: 5px; height: 12px;
+  margin-left: 1px;
+  vertical-align: -1px;
+  background: var(--accent);
+  animation: blink 1s steps(2, start) infinite;
+}
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* 指标行错开浮现 */
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 18px; }
+
+.metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(255,255,255,.045);
+  opacity: 0;
+  transform: translateY(5px);
+  filter: blur(4px);
+  animation: metric-in .5s var(--ease-out) forwards;
+  animation-delay: var(--d, 0ms);
+}
+.metric:last-child, .metric:nth-last-child(2) { border-bottom: 0; }
+
+@keyframes metric-in {
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+
+/* freeze 截图模式：直接落终态 */
+.is-static .metric { animation: none; opacity: 1; transform: none; filter: none; }
+.is-static .dot { animation: none; }
+.is-static .step-slot { transition: none; }
+.is-static .step { opacity: 1; transform: none; transition: none; }
+.is-static .step.is-done .dot::after {
+  animation: none;
+  opacity: 1;
+  transform: rotate(-45deg) scale(1);
+}
+.is-static .summary .caret { display: none; }
+
+.metric .k { color: var(--faint); white-space: nowrap; }
+.metric .v {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .metrics { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="controls">
+  <button id="replay">重播</button>
+  <button id="slow">0.4× 慢放</button>
+  <button id="theme">切换亮色</button>
+  <span class="hint">观察：步骤逐个点亮 · 进度条推进 · 耗时跳动 · 摘要逐字 · 指标错开浮现</span>
+</div>
+
+<div class="card" id="card">
+  <div class="card-head" id="head">
+    <span class="spark">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.4l1.9 5.1 5.1 1.9-5.1 1.9L12 16.4l-1.9-5.1L5 9.4l5.1-1.9z"/></svg>
+    </span>
+    <span class="head-text" id="headText">正在检索文献…</span>
+    <span class="head-total" id="headTotal">0.0s</span>
+  </div>
+
+  <div class="steps" id="steps"></div>
+</div>
+
+<script>
+/* ── 演示数据 ─────────────────────────────────────────────── */
+const STEPS = [
+  {
+    key: 'intent',
+    label: '意图识别',
+    sub: 'Query Rewriting',
+    ms: 4900,
+    summary: '识别为高血压用药咨询，补全为「基层高血压初始用药选择」',
+    metrics: [
+      ['Rewritten Query', '高血压 基层 初始用药'],
+      ['Domain', 'cardiology'],
+      ['Coverage', 'high'],
+      ['Complexity', 'moderate'],
+    ],
+  },
+  {
+    key: 'retrieval',
+    label: '混合检索',
+    sub: 'Hybrid Search',
+    ms: 3000,
+    summary: '双路召回：向量 200 条 + 全文 200 条，耗时均衡',
+    metrics: [
+      ['Milvus Hits', '200'],
+      ['ES Hits', '200'],
+      ['Routing', 'both'],
+      ['Top K', '200'],
+    ],
+  },
+  {
+    key: 'fusion',
+    label: '融合重排',
+    sub: 'Reranking',
+    ms: 4200,
+    summary: 'RRF 融合后经 Qwen3-Reranker 精排，保留 38 条',
+    metrics: [
+      ['Output Count', '38'],
+      ['Top Score', '0.930'],
+      ['Model', 'qwen3-reranker'],
+      ['Drop', '362'],
+    ],
+  },
+  {
+    key: 'answer',
+    label: '生成回答',
+    sub: 'Answer',
+    ms: 5100,
+    summary: '基于 8 段上下文生成，含 5 条引用',
+    metrics: [
+      ['Model', 'deepseek-chat'],
+      ['Context Chunks', '8'],
+      ['Total Tokens', '1802'],
+      ['Elapsed', '15.1s'],
+    ],
+  },
+];
+
+/* ── DOM 构建 ─────────────────────────────────────────────── */
+const stepsEl = document.getElementById('steps');
+
+function build() {
+  stepsEl.innerHTML = STEPS.map((s) => `
+    <div class="step-slot" data-slot="${s.key}">
+      <div class="step" data-key="${s.key}">
+        <div class="rail"><span class="dot"></span></div>
+        <div class="body">
+          <div class="row">
+            <span class="label">${s.label}</span>
+            <span class="sub">${s.sub}</span>
+            <span class="time">0.0s</span>
+            <span class="chev">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+            </span>
+          </div>
+          <div class="bar"><i></i></div>
+          <div class="detail">
+            <div>
+              <div class="detail-inner">
+                <p class="summary"></p>
+                <div class="metrics"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+/** 让某个步骤"长出来"，并把上一个步骤的尾巴线收掉 */
+function revealStep(key) {
+  const slot = stepsEl.querySelector(`[data-slot="${key}"]`);
+  if (!slot) return;
+  stepsEl.querySelectorAll('.step-slot.is-last').forEach((el) => el.classList.remove('is-last'));
+  const idx = STEPS.findIndex((s) => s.key === key);
+  const prev = stepsEl.querySelector(`[data-slot="${STEPS[idx - 1]?.key}"]`);
+  prev?.classList.remove('is-last');
+  slot.classList.add('is-shown', 'is-last');
+}
+
+/* ── 工具 ─────────────────────────────────────────────────── */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const fmt = (ms) => (ms / 1000).toFixed(1) + 's';
+
+let runToken = 0;
+let speed = 1;
+
+/* 逐字打出摘要 */
+async function typeText(el, text, token, perChar = 26) {
+  el.textContent = '';
+  for (let i = 0; i < text.length; i++) {
+    if (token !== runToken) return;
+    el.textContent = text.slice(0, i + 1);
+    const caret = document.createElement('span');
+    caret.className = 'caret';
+    el.appendChild(caret);
+    await sleep(perChar * speed);
+  }
+  el.textContent = text;
+}
+
+/* 指标错开浮现 */
+function showMetrics(container, metrics) {
+  container.innerHTML = metrics
+    .map(([k, v], i) => `
+      <div class="metric" style="--d:${i * 80}ms">
+        <span class="k">${k}</span>
+        <span class="v" title="${v}">${v}</span>
+      </div>
+    `)
+    .join('');
+}
+
+/* ── 点击展开：首次展开时才跑逐字 + 错开浮现 ── */
+const populated = new Set();
+
+function toggleStep(key) {
+  const el = stepsEl.querySelector(`[data-key="${key}"]`);
+  if (!el || !el.classList.contains('is-done')) return;
+
+  const willExpand = !el.classList.contains('is-expanded');
+  el.classList.toggle('is-expanded', willExpand);
+  if (!willExpand) return;
+
+  if (!populated.has(key)) {
+    populated.add(key);
+    const s = STEPS.find((x) => x.key === key);
+    typeText(el.querySelector('.summary'), s.summary, runToken);
+    showMetrics(el.querySelector('.metrics'), s.metrics);
+  }
+}
+
+stepsEl.addEventListener('click', (e) => {
+  const stepEl = e.target.closest('.step');
+  if (stepEl?.classList.contains('is-done')) toggleStep(stepEl.dataset.key);
+});
+
+/* ── 主时间线 ─────────────────────────────────────────────── */
+async function run() {
+  const token = ++runToken;
+  build();
+  populated.clear();
+
+  const head = document.getElementById('head');
+  const headText = document.getElementById('headText');
+  const headTotal = document.getElementById('headTotal');
+
+  head.classList.add('is-running');
+  headText.classList.remove('is-done');
+  headText.textContent = '正在检索文献…';
+
+  const t0 = performance.now();
+  const totalTimer = setInterval(() => {
+    if (token !== runToken) return clearInterval(totalTimer);
+    headTotal.textContent = fmt((performance.now() - t0) / speed);
+  }, 100);
+
+  for (let i = 0; i < STEPS.length; i++) {
+    if (token !== runToken) return clearInterval(totalTimer);
+    const s = STEPS[i];
+    const el = stepsEl.querySelector(`[data-key="${s.key}"]`);
+    const timeEl = el.querySelector('.time');
+    const barFill = el.querySelector('.bar > i');
+
+    headText.textContent = `${s.label}中…`;
+
+    // 关键：这一步此刻才"长出来"，后面的还没出现
+    revealStep(s.key);
+    await sleep(200 * speed);          // 等入场动画
+    if (token !== runToken) return clearInterval(totalTimer);
+
+    el.classList.add('is-running');
+
+    // 耗时实时跳动 + 进度条推进（按真实 ms 折算）
+    const started = performance.now();
+    await new Promise((resolve) => {
+      const tick = () => {
+        if (token !== runToken) return resolve();
+        const elapsed = (performance.now() - started) / speed;
+        timeEl.textContent = fmt(elapsed);
+        barFill.style.width = Math.min(100, (elapsed / s.ms) * 100) + '%';
+        if (elapsed >= s.ms) return resolve();
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+
+    if (token !== runToken) return clearInterval(totalTimer);
+
+    // 完成态：只变勾 + 显示耗时，**不自动展开明细**
+    el.classList.remove('is-running');
+    el.classList.add('is-done');
+    timeEl.textContent = fmt(s.ms);
+
+    await sleep(260 * speed);
+  }
+
+  if (token !== runToken) return clearInterval(totalTimer);
+  clearInterval(totalTimer);
+  head.classList.remove('is-running');
+  headText.textContent = `检索与推理完成 · ${STEPS.length} 步`;
+  headText.classList.add('is-done');
+  headTotal.textContent = fmt(STEPS.reduce((a, b) => a + b.ms, 0));
+}
+
+/* ── 交互 ─────────────────────────────────────────────────── */
+document.getElementById('replay').addEventListener('click', () => {
+  runToken++;
+  run();
+});
+
+const slowBtn = document.getElementById('slow');
+slowBtn.addEventListener('click', () => {
+  speed = speed === 1 ? 2.5 : 1;
+  slowBtn.textContent = speed === 1 ? '0.4× 慢放' : '1× 正常';
+  runToken++;
+  run();
+});
+
+document.getElementById('theme').addEventListener('click', (e) => {
+  const root = document.documentElement;
+  const light = root.dataset.theme === 'light';
+  root.dataset.theme = light ? 'dark' : 'light';
+  e.target.textContent = light ? '切换亮色' : '切换暗色';
+});
+
+/* ── 静态渲染：?freeze=毫秒 ──
+   用于截图核对每个阶段的样子；不影响默认的动画播放。 */
+function renderStatic(t, expandAll = false) {
+  build();
+  // 截图用：关掉入场动画，避免停在 opacity:0 的中间帧
+  document.getElementById('card').classList.add('is-static');
+  const head = document.getElementById('head');
+  const headText = document.getElementById('headText');
+  const headTotal = document.getElementById('headTotal');
+
+  let acc = 0;
+  let current = null;
+
+  for (const s of STEPS) {
+    const el = stepsEl.querySelector(`[data-key="${s.key}"]`);
+    const timeEl = el.querySelector('.time');
+    const barFill = el.querySelector('.bar > i');
+    const startAt = acc;
+    acc += s.ms;
+
+    if (t > startAt) revealStep(s.key);
+
+    if (t >= acc) {
+      el.classList.add('is-done');
+      timeEl.textContent = fmt(s.ms);
+      // 默认折叠；?expand=1 时才自动展开（截图用）
+      if (expandAll) {
+        el.classList.add('is-expanded');
+        el.querySelector('.summary').textContent = s.summary;
+        showMetrics(el.querySelector('.metrics'), s.metrics);
+      }
+    } else if (t > startAt) {
+      el.classList.add('is-running');
+      const elapsed = t - startAt;
+      timeEl.textContent = fmt(elapsed);
+      barFill.style.width = (elapsed / s.ms) * 100 + '%';
+      current = s;
+    }
+  }
+
+  if (current) {
+    head.classList.add('is-running');
+    headText.textContent = `${current.label}中…`;
+  } else {
+    headText.textContent = `检索与推理完成 · ${STEPS.length} 步`;
+    headText.classList.add('is-done');
+  }
+  headTotal.textContent = fmt(Math.min(t, acc));
+}
+
+const params = new URLSearchParams(location.search);
+const freeze = params.get('freeze');
+if (freeze !== null) {
+  renderStatic(Number(freeze), params.get('expand') === '1');
+} else {
+  run();
+}
+</script>
+</body>
+</html>

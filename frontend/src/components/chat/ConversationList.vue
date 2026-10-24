@@ -99,27 +99,38 @@ function handleEditKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="space-y-0.5">
-    <!-- Skeleton -->
-    <div v-if="chatStore.conversationsLoading" class="space-y-1 px-3 py-2">
-      <div v-for="i in 4" :key="'cs-' + i" class="flex items-center gap-2.5 py-1.5">
-        <div class="h-4 w-4 shrink-0 rounded bg-slate-200 animate-pulse" />
-        <div class="h-3 flex-1 rounded bg-slate-200 animate-pulse" :style="{ width: `${60 + i * 10}%` }" />
+    <!-- 标题 -->
+    <div
+      v-if="!chatStore.conversationsLoading && sortedList.length"
+      class="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[.4px] text-faint"
+    >
+      最近
+    </div>
+
+    <!-- 骨架 -->
+    <div v-if="chatStore.conversationsLoading" class="space-y-1.5 px-2 py-2">
+      <div v-for="i in 4" :key="'cs-' + i" class="flex items-center gap-2.5">
+        <div class="skeleton h-3.5 w-3.5 rounded" />
+        <div class="skeleton h-3 flex-1" :style="{ width: `${60 + i * 8}%` }" />
       </div>
     </div>
+
     <p
       v-if="!chatStore.conversationsLoading && sortedList.length === 0"
-      class="px-2 py-4 text-center text-xs text-slate-400"
+      class="px-3 py-6 text-center text-[12px] text-faint"
     >
       暂无历史对话
     </p>
+
+    <!-- 会话项 -->
     <div
       v-for="conv in sortedList"
       :key="conv.id"
-      class="group flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:outline-none"
+      class="group flex w-full cursor-pointer items-center gap-2.5 rounded-full px-2.5 py-2 text-left text-[13.5px] transition-colors"
       :class="
         chatStore.currentConversationId === conv.id
-          ? 'bg-slate-100 text-slate-900'
-          : 'text-slate-600'
+          ? 'bg-accent-soft text-accent-text font-medium'
+          : 'text-ink-2 hover:bg-hover'
       "
       role="button"
       tabindex="0"
@@ -127,56 +138,59 @@ function handleEditKeydown(e: KeyboardEvent) {
       @dblclick="handleRowDblClick(conv)"
       @keydown.enter="selectConv(conv.id)"
     >
-      <MessageSquare :size="16" class="shrink-0 text-slate-400" />
+      <MessageSquare
+        :size="14"
+        class="shrink-0"
+        :class="chatStore.currentConversationId === conv.id ? 'text-accent' : 'text-faint'"
+      />
 
-      <!-- Edit mode -->
+      <!-- 重命名 -->
       <input
         v-if="editingId === conv.id"
         :id="`conv-edit-${conv.id}`"
         v-model="editTitle"
-        class="flex-1 rounded border border-primary-300 bg-white px-1.5 py-0.5 text-sm text-slate-700 outline-none ring-1 ring-primary-300"
+        class="min-w-0 flex-1 rounded border border-accent bg-canvas px-1.5 py-0.5 text-[13px] text-ink outline-none"
         maxlength="50"
         @blur="saveEdit"
         @keydown="handleEditKeydown"
         @click.stop
       />
 
-      <!-- Normal display -->
-      <span
-        v-else
-        class="flex-1 truncate"
-      >{{ conv.title }}</span>
+      <span v-else class="min-w-0 flex-1 truncate">{{ conv.title }}</span>
 
-      <!-- Delete confirmation -->
+      <!-- 删除确认 -->
       <template v-if="confirmDeleteId === conv.id">
-        <span class="shrink-0 text-[11px] text-red-500">确认删除？</span>
         <button
-          class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-red-500 hover:bg-red-50 transition-all"
+          class="grid h-6 w-6 shrink-0 place-items-center rounded-full text-danger transition-colors hover:bg-danger-soft"
+          title="确认删除"
           @click="(e: Event) => confirmDelete(conv.id, e)"
         >
-          <Trash2 :size="14" />
+          <Trash2 :size="13" />
         </button>
         <button
-          class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-100 transition-all"
+          class="grid h-6 w-6 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-hover"
+          title="取消"
           @click="cancelDelete"
         >
-          <span class="text-xs">✕</span>
+          <span class="text-[11px]">✕</span>
         </button>
       </template>
 
-      <!-- Normal actions -->
-      <template v-else-if="editingId !== conv.id && confirmDeleteId !== conv.id">
+      <!-- 行内操作 -->
+      <template v-else-if="editingId !== conv.id">
         <button
-          class="flex h-6 w-6 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100 text-slate-400 hover:text-primary-500 transition-all"
+          class="grid h-6 w-6 shrink-0 place-items-center rounded-full text-faint opacity-0 transition-all hover:bg-hover hover:text-accent group-hover:opacity-100"
+          title="重命名"
           @click.stop="startEdit(conv)"
         >
-          <Pencil :size="13" />
+          <Pencil :size="12" />
         </button>
         <button
-          class="flex h-6 w-6 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-all"
+          class="grid h-6 w-6 shrink-0 place-items-center rounded-full text-faint opacity-0 transition-all hover:bg-danger-soft hover:text-danger group-hover:opacity-100"
+          title="删除"
           @click="(e: Event) => requestDelete(conv.id, e)"
         >
-          <Trash2 :size="14" />
+          <Trash2 :size="13" />
         </button>
       </template>
     </div>
