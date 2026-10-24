@@ -52,7 +52,8 @@ describe('chat store — SSE 帧处理', () => {
 
     const step = s.streamRagSteps['fusion']
     expect(step).toBeDefined()
-    expect(step!.status).toBe('completed')
+    // 契约：done 是规范值，前端不再映射成 completed（那层映射曾导致回放丢勾选态）
+    expect(step!.status).toBe('done')
     expect(step!.metrics).toEqual({ top_scores: [0.9, 0.8] })
 
     s.stopReveal()

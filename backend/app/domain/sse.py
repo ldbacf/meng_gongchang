@@ -13,14 +13,32 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.domain.lifecycle import StepStatus, normalize_step_status
+
 
 def envelope(t: str, **fields) -> dict:
     """版本信封：`{v:1, t:..., **fields}`。"""
     return {"v": 1, "t": t, **fields}
 
 
-def frame_step(k: str, s: str, elapsed_ms: int = 0, metrics: dict | None = None) -> dict:
-    return envelope("step", k=k, s=s, elapsed_ms=elapsed_ms, metrics=metrics or {})
+def frame_step(
+    k: str,
+    s: StepStatus | str,
+    elapsed_ms: int = 0,
+    metrics: dict | None = None,
+) -> dict:
+    """步骤帧。
+
+    `s` 一律经 `normalize_step_status` 归一后发出 —— 前端只需比较 `done`，
+    不必再维护 `completed` 之类的映射（这个映射正是勾选态丢失的根因）。
+    """
+    return envelope(
+        "step",
+        k=k,
+        s=normalize_step_status(s),
+        elapsed_ms=elapsed_ms,
+        metrics=metrics or {},
+    )
 
 
 def frame_text(c: str) -> dict:

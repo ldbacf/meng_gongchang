@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Conversation, Message, Citation, RagSteps, SSEMessage } from '@/types'
+import { normalizeStepStatus } from '@/types/step'
 import { fetchConversationsApi, createConversationApi, fetchMessagesApi, deleteConversationApi, renameConversationApi } from '@/api/chat'
 
 export const useChatStore = defineStore('chat', () => {
@@ -184,7 +185,9 @@ export const useChatStore = defineStore('chat', () => {
         streamRagSteps.value = {
           ...streamRagSteps.value,
           [msg.k]: {
-            status: msg.s === 'done' ? 'completed' : 'pending',
+            // 直接用后端的规范值（`done`），不再映射成 `completed` ——
+            // 那层映射正是"历史会话回放丢失勾选态"的根因。
+            status: normalizeStepStatus(msg.s),
             title: msg.title,
             summary: msg.summary,
             elapsed_ms: msg.elapsed_ms,

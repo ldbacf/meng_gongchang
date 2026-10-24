@@ -9,6 +9,8 @@ true，对应 A-4.5 / T-4.6（降级可观测，不再静默）。
 """
 from __future__ import annotations
 
+from app.domain.lifecycle import StepStatus, normalize_step_status
+
 STEP_TITLES = {
     "intent": "意图识别",
     "retrieval": "混合检索",
@@ -93,7 +95,7 @@ _BUILDERS = {
 def build_rag_step(
     key: str,
     *,
-    status: str = "done",
+    status: StepStatus | str = "done",
     title: str = "",
     elapsed_ms: int = 0,
     **metric_kwargs,
@@ -102,12 +104,13 @@ def build_rag_step(
 
     `key` 必在 STEP_TITLES；`metric_kwargs` 按 key 分发到对应 metrics 构建器。
     非法 key 抛 KeyError（防字段漂移写错步名）。
+    `status` 一律归一成 `app.domain.lifecycle.StepStatus`（`done` 是规范值）。
     """
     if key not in _BUILDERS:
         raise KeyError(f"unknown rag step: {key}")
     metrics = _BUILDERS[key](**metric_kwargs)
     return {
-        "status": status,
+        "status": normalize_step_status(status, default="done"),
         "title": title or STEP_TITLES[key],
         "elapsed_ms": int(elapsed_ms),
         "metrics": metrics,

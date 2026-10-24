@@ -5,6 +5,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.domain.lifecycle import StepStatus
+
 
 class TaskCreateResponse(BaseModel):
     id: uuid.UUID
@@ -100,7 +102,8 @@ class CitationSchema(BaseModel):
 
 
 class RagStepSchema(BaseModel):
-    status: str
+    # 取自全后端唯一契约：`done` 是规范值，`completed` 之类不属于本枚举
+    status: StepStatus
     title: str
     summary: str | None = None
 

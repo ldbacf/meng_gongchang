@@ -1,4 +1,5 @@
 export * from './auth'
 export * from './chat'
 export * from './knowledge'
+export * from './step'
 export * from './user'
