@@ -1,11 +1,14 @@
 """Pydantic schemas"""
 
+import logging
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.domain.lifecycle import StepStatus
+from app.domain.lifecycle import StepStatus, normalize_step_status
+
+logger = logging.getLogger(__name__)
 
 
 class TaskCreateResponse(BaseModel):
@@ -102,10 +105,27 @@ class CitationSchema(BaseModel):
 
 
 class RagStepSchema(BaseModel):
-    # 取自全后端唯一契约：`done` 是规范值，`completed` 之类不属于本枚举
+    """RAG 步骤的响应形状。
+
+    `status` 走 `StepStatus` 枚举，但配了 **before 校验器**：历史数据里的
+    `completed` / `success` / `error` 在**读取边界**归一，而不是让整个请求 500。
+
+    为什么不直接严格拒绝：`GET /conversations/{id}/messages` 返回整个消息列表，
+    只要有一条老消息带 `completed`，该会话就彻底打不开。归一 + 告警是更稳妥的取舍。
+    """
+
     status: StepStatus
     title: str
     summary: str | None = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _normalize_status(cls, v: object) -> object:
+        out = normalize_step_status(v)
+        if isinstance(v, str) and v != out:
+            # 不静默：出现即说明有旧写入方或脏数据，留痕便于排查
+            logger.warning("rag_steps.status 归一：%r → %r", v, out)
+        return out
 
 
 class MessageResponse(BaseModel):
@@ -113,7 +133,8 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     citations: list[CitationSchema] | None = None
-    rag_steps: dict | None = None
+    # 收紧：每个 step 都按 RagStepSchema 校验（status 在读取边界归一）
+    rag_steps: dict[str, RagStepSchema] | None = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 

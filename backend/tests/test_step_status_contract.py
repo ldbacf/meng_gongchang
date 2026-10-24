@@ -28,7 +28,7 @@ from app.domain.lifecycle import (
     normalize_step_status,
 )
 from app.domain.sse import frame_step
-from app.interface.schemas import RagStepSchema
+from app.interface.schemas import MessageResponse, RagStepSchema
 
 
 # ── 单一取值集合 ────────────────────────────────────────────
@@ -108,11 +108,47 @@ def test_schema_accepts_canonical():
     assert RagStepSchema(status="pending", title="x").status == "pending"
 
 
-@pytest.mark.parametrize("bad", ["completed", "DONE", "weird"])
-def test_schema_rejects_non_canonical(bad):
-    """`completed` 不在契约里 —— 出现即说明有人想把旧映射塞回来。"""
-    with pytest.raises(ValidationError):
-        RagStepSchema(status=bad, title="x")
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("completed", "done"),   # 6~8 月旧版后端留下的值（库里实存 44 处）
+        ("complete", "done"),
+        ("success", "done"),
+        ("error", "failed"),
+        ("DONE", "done"),        # 大小写
+        ("weird", "pending"),    # 未知值降级，不让会话打不开
+        (None, "pending"),
+    ],
+)
+def test_schema_normalizes_instead_of_raising(raw, expected):
+    """读取边界归一：历史脏数据不能让 `GET messages` 整个 500。"""
+    assert RagStepSchema(status=raw, title="x").status == expected
+
+
+def test_schema_field_is_the_enum():
+    """OpenAPI 里暴露的必须是 5 值枚举，而不是自由字符串。"""
+    from typing import get_args
+
+    assert set(get_args(RagStepSchema.model_fields["status"].annotation)) == STEP_STATUSES
+
+
+def test_message_response_tolerates_legacy_payload():
+    """整条历史消息（含 completed）能被解析，且输出规范化。"""
+    payload = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "role": "ai",
+        "content": "x",
+        "citations": None,
+        "created_at": "2026-06-12T06:15:38Z",
+        "rag_steps": {
+            "intent": {"status": "completed", "title": "意图识别"},
+            "retrieval": {"status": "done", "title": "混合检索"},
+        },
+    }
+    msg = MessageResponse.model_validate(payload)
+    assert msg.rag_steps is not None
+    assert msg.rag_steps["intent"].status == "done"
+    assert msg.rag_steps["retrieval"].status == "done"
 
 
 # ── 文档流水线校验器 ───────────────────────────────────────
