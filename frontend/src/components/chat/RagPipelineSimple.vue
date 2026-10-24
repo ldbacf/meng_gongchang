@@ -19,6 +19,14 @@ function get(key: StepKey): RagStep | undefined {
 }
 
 /**
+ * 完成判定：后端写入/回放的是 `"done"`，SSE 映射后是 `"completed"`，两种都要认。
+ * 只认一种时，历史会话回放会丢勾选态（表现为空心圈、点不开）。
+ */
+function isDone(step: RagStep | undefined): boolean {
+  return step?.status === 'completed' || step?.status === 'done'
+}
+
+/**
  * 只渲染**已经出现**的步骤。
  *
  * 后端按顺序发 step 事件（intent pending → done → retrieval pending …），
@@ -78,7 +86,7 @@ function isOpen(key: string): boolean {
 
 function toggle(key: StepKey) {
   const step = get(key)
-  if (!step || step.status !== 'completed') return
+  if (!step || !isDone(step)) return
 
   const next = new Set(openKeys.value)
   if (next.has(key)) {
@@ -152,26 +160,26 @@ function metricEntries(key: StepKey): { k: string; v: string }[] {
       <div class="step">
         <button
           class="row group/row"
-          :class="{ 'is-clickable': r.step.status === 'completed' }"
+          :class="{ 'is-clickable': isDone(r.step) }"
           @click="toggle(r.key)"
         >
           <!-- 状态点 -->
           <span
             class="grid h-[15px] w-[15px] shrink-0 place-items-center rounded-full border transition-colors duration-300"
             :class="{
-              'border-ok bg-ok': r.step.status === 'completed',
+              'border-ok bg-ok': isDone(r.step),
               'border-accent border-t-transparent animate-spin': r.step.status === 'pending',
             }"
           >
             <svg
-              v-if="r.step.status === 'completed'"
+              v-if="isDone(r.step)"
               class="dot-check"
               width="8" height="8" viewBox="0 0 24 24" fill="none"
               stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"
             ><path d="m4 12 5 5L20 6" /></svg>
           </span>
 
-          <span class="text-[12.5px] font-medium" :class="r.step.status === 'completed' ? 'text-ink-2' : 'text-ink'">
+          <span class="text-[12.5px] font-medium" :class="isDone(r.step) ? 'text-ink-2' : 'text-ink'">
             {{ r.label }}
           </span>
           <span class="text-[11.5px] text-faint">{{ r.sub }}</span>
@@ -181,7 +189,7 @@ function metricEntries(key: StepKey): { k: string; v: string }[] {
           </span>
 
           <ChevronDown
-            v-if="r.step.status === 'completed'"
+            v-if="isDone(r.step)"
             :size="12"
             class="shrink-0 text-faint transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)]"
             :class="{ 'rotate-180': isOpen(r.key) }"

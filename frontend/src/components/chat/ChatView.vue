@@ -37,6 +37,18 @@ const streamMessageWithRagSteps = computed(() => ({
   citations: chatStore.streamCitations,
 }))
 
+/**
+ * 流式气泡只在「当前会话 === 正在生成的会话」时渲染。
+ *
+ * 这样中途切到别的对话再切回来，正在跑的回答还在；切到别处时那条气泡
+ * 也不会串进别人的会话。
+ */
+const showStreaming = computed(
+  () =>
+    chatStore.isStreaming &&
+    chatStore.streamingConversationId === chatStore.currentConversationId,
+)
+
 // ── Right panel state ──
 
 const rightPanelOpen = ref(false)
@@ -149,6 +161,7 @@ function abortStreaming() {
   if (chatStore.isStreaming) {
     chatStore.stopReveal()
     chatStore.isStreaming = false
+    chatStore.streamingConversationId = null
     chatStore.streamContent = ''
     chatStore.streamCitations = []
   }
@@ -157,7 +170,7 @@ function abortStreaming() {
 watch(
   () => route.params.id,
   async (newId) => {
-    abortStreaming()
+    // 不再 abort：切换到别的会话时让 SSE 继续跑，切回来还能看到进行中的回答
     if (newId && typeof newId === 'string') {
       if (chatStore.currentConversationId !== newId) {
         messagesLoading.value = true
@@ -178,7 +191,13 @@ watch(
 watch(
   () => chatStore.isStreaming,
   (streaming) => {
-    if (!streaming && chatStore.currentConversationId && !route.params.id) {
+    // 只有当用户还停在这个会话里时才补写 URL；切到别处后不要把人拽回来
+    if (
+      !streaming &&
+      chatStore.currentConversationId &&
+      !route.params.id &&
+      chatStore.streamingConversationId === null
+    ) {
       router.replace(`/chat/${chatStore.currentConversationId}`)
     }
   },
@@ -230,7 +249,7 @@ async function handleSend(content: string) {
       <div ref="messagesContainer" class="flex-1 overflow-y-auto">
         <!-- 空状态 -->
         <EmptyState
-          v-if="!chatStore.currentConversationId && !chatStore.isStreaming && !messagesLoading"
+          v-if="!chatStore.currentConversationId && !showStreaming && !messagesLoading"
           @ask="handleSend"
         />
 
@@ -259,8 +278,8 @@ async function handleSend(content: string) {
               </template>
             </TransitionGroup>
 
-            <!-- 正在流式输出的消息 -->
-            <div v-if="chatStore.isStreaming">
+            <!-- 正在流式输出的消息（只在它所属的会话里显示） -->
+            <div v-if="showStreaming">
               <MessageBubble
                 :message="streamMessageWithRagSteps"
                 :is-streaming="true"
