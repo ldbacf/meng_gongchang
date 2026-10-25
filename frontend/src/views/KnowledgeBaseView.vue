@@ -6,6 +6,9 @@ import { useToastStore } from '@/stores/toast'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { Plus, BookOpen, Trash2, ArrowRight, Lock, Check } from 'lucide-vue-next'
 
+/** 嵌入「后台管理」聚合页时：不套外壳、不渲染自己的大标题 */
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
+
 const adminStore = useAdminStore()
 const toastStore = useToastStore()
 const router = useRouter()
@@ -69,14 +72,14 @@ function goToKB(kbId: string) {
 </script>
 
 <template>
-  <AppLayout>
+  <AppLayout :bare="embedded">
     <div class="flex h-full flex-col overflow-hidden">
-      <!-- 页头 -->
+      <!-- 页头（嵌入时不显示大标题，外面已有页签） -->
       <div class="border-b border-line px-8 pb-5 pt-2">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <h1 class="text-[22px] font-semibold tracking-[-.3px]">知识库管理</h1>
-            <p class="mt-1 text-[13px] text-muted">
+            <h1 v-if="!embedded" class="text-[22px] font-semibold tracking-[-.3px]">知识库管理</h1>
+            <p class="mt-1 text-[13px] text-muted" :class="{ 'mt-0': embedded }">
               每个知识库独立建索引与检索；共
               <b class="font-semibold text-ink-2">{{ adminStore.knowledgeBases.length }}</b> 个库 ·
               <b class="font-semibold text-ink-2">{{ totalDocs }}</b> 篇文献
