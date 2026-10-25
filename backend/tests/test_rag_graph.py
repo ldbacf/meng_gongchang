@@ -24,6 +24,11 @@ from app.infrastructure.container import AppContainer
 from app.interface.deps import set_container
 from app.infrastructure.db.models import Conversation, Message, User
 
+# 需要真实 PG：isolated_db 建独立临时库（不碰开发库）。
+# 以前没有这层隔离，fixture 直接往 mineru_pipeline 插 qt_* 用户，
+# teardown 的 delete 又漏了 commit，每跑一次就留一批垃圾。
+pytestmark = pytest.mark.usefixtures("isolated_db")
+
 
 def _fact(n: int, seed: str) -> tuple[list[SearchHit], list[SearchHit]]:
     m_hits, e_hits = [], []
@@ -83,12 +88,15 @@ async def rag_env(monkeypatch):
 
     yield container, uid, cid, recall_calls
 
+    # 显式回滚：隔离库用完即 DROP，这里只是让 session 干净收尾。
+    # 历史上这里漏了 commit，导致 delete 在事务关闭时被回滚 —— 数据一直残留。
     async with container.get_db_sessionmaker()() as session:
         from sqlalchemy import delete
 
         await session.execute(delete(Message).where(Message.conversation_id == uuid.UUID(cid)))
         await session.execute(delete(Conversation).where(Conversation.id == uuid.UUID(cid)))
         await session.execute(delete(User).where(User.username.like("qt_%")))
+        await session.commit()
 
 
 def _initial(uid: str, cid: str):

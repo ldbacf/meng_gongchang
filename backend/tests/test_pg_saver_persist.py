@@ -20,6 +20,10 @@ from langgraph.graph import END, START, StateGraph
 from app.infrastructure.checkpoint.pg_saver import close_pg_saver, create_pg_saver
 from app.infrastructure.settings import get_settings
 
+# 需要真实 PG：isolated_db 建独立临时库（不碰开发库）。
+# 本模块验证 checkpoint 真落库，用独立库同样成立（表由 alembic 0002 建好）。
+pytestmark = pytest.mark.usefixtures("isolated_db")
+
 
 class _S(TypedDict, total=False):
     seed: int
