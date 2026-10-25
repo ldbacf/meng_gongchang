@@ -51,24 +51,53 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="MedRAG API（含 Windows 事件循环修正）")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument(
+        "--reload",
+        action="store_true",
+        help="改代码自动重启（仅本地开发；worker 也支持 --reload）",
+    )
     args = ap.parse_args()
 
     _configure_event_loop()
 
     import uvicorn
 
-    uvicorn.run(
-        "app.main:app",
-        host=args.host,
-        port=args.port,
-        # loop="none" → uvicorn 不接管事件循环，asyncio.run 回落到上面设的 policy。
-        # 用默认的 "auto"/"asyncio" 会被 uvicorn 硬编码成 ProactorEventLoop（见模块 docstring）。
-        loop="none",
+    # ── reload 与 loop 的组合在 Windows 上是互斥的 ──────────────────────
+    #
+    # 不用 reload：uvicorn 走**同进程**，asyncio_loop_factory(use_subprocess=False)
+    # 在 win32 上硬编码返回 ProactorEventLoop → psycopg async 不可用。
+    # 所以必须 loop="none" 让它不接管循环、回落到上面的 SelectorEventLoopPolicy。
+    #
+    # 用 reload：uvicorn 必然走**子进程**（Supervisor 派生子进程加载 app），
+    # asyncio_loop_factory(use_subprocess=True) 反而返回 SelectorEventLoop —— 天然正确。
+    # 此时若还传 loop="none"，子进程里没人设 policy，又会拿到 ProactorEventLoop 而崩。
+    # 所以：reload 时不要传 loop，交给 uvicorn 自己按子进程路径选。
+    run_kwargs: dict = {
+        "host": args.host,
+        "port": args.port,
         # log_config=None → 不让 uvicorn 用它自己的 LOGGING_CONFIG 覆盖我们的 JSON 日志。
         # 否则它会在 import 之后把 uvicorn.access 重设回 INFO，输出非 JSON 的
         # `INFO: 127.0.0.1 - "GET ... 200 OK"`，和业务日志混在一起、还把真正的日志淹掉。
-        log_config=None,
-    )
+        "log_config": None,
+    }
+    if args.reload:
+        run_kwargs.update(
+            reload=True,
+            # 只监听代码目录。传 backend/ 会把 .venv（5GB）、data/（12GB）也纳入监视，
+            # watchfiles 遍历成本高且容易漏事件。
+            reload_dirs=[str(_backend_root() / "app"), str(_backend_root() / "cli")],
+        )
+    else:
+        run_kwargs["loop"] = "none"
+
+    uvicorn.run("app.main:app", **run_kwargs)
+
+
+def _backend_root():
+    """backend/ 目录（reload 只监听代码，避免盯着 .venv 与 data/）。"""
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent
 
 
 if __name__ == "__main__":

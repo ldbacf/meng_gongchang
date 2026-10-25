@@ -3,6 +3,7 @@
 #   .\scripts\dev.ps1              # 起 Docker 基础设施 + 3 个后端进程 + 前端
 #   .\scripts\dev.ps1 -NoDocker    # 基础设施已经在跑，只起应用进程
 #   .\scripts\dev.ps1 -NoFrontend  # 只起后端（前端自己另外开）
+#   .\scripts\dev.ps1 -NoReload    # 关掉热重载（默认开）
 #
 # 每个服务各占一个 PowerShell 窗口，日志实时可见。
 # 停止：.\scripts\dev-stop.ps1
@@ -13,9 +14,15 @@
 #   worker     —— 消费 Redis Stream 跑 MinerU 解析+切分+embedding+写库，单个 PDF 可能几分钟，
 #                 绝不能放在请求链路里
 #   frontend   —— Vite 开发服务器（仅开发期需要）
+#
+# 热重载（Windows 特有）：
+#   API 的 --reload 走 uvicorn 子进程，而 uvicorn 在子进程路径下正好返回
+#   SelectorEventLoop，所以 psycopg async 依然可用（见 app/run_api.py 注释）。
+#   worker 用 watchfiles 重启整个进程（不是热替换模块），避免半截队列状态。
 param(
     [switch]$NoDocker,
-    [switch]$NoFrontend
+    [switch]$NoFrontend,
+    [switch]$NoReload
 )
 
 $ErrorActionPreference = 'Stop'
@@ -75,11 +82,15 @@ Write-Host '进程已退出，按任意键关闭窗口' -ForegroundColor Yellow
 }
 
 Write-Step '启动后端进程'
-Start-Window -Title 'MedRAG API :8000' -WorkDir $backend -Command 'uv run medrag-api'
+$reloadFlag = if ($NoReload) { '' } else { ' --reload' }
+if ($NoReload) { Write-Host '    （已关闭热重载）' -ForegroundColor DarkGray }
+
+Start-Window -Title 'MedRAG API :8000' -WorkDir $backend -Command "uv run medrag-api$reloadFlag"
 Start-Sleep -Milliseconds 400
+# embedding 常驻 bge-m3：重载会重载模型（~30s），默认不挂 --reload，改了 embedding 相关代码手动重启它
 Start-Window -Title 'MedRAG Embedding :8084' -WorkDir $backend -Command 'uv run embedding-server'
 Start-Sleep -Milliseconds 400
-Start-Window -Title 'MedRAG Worker (queue)' -WorkDir $backend -Command 'uv run pipeline-worker'
+Start-Window -Title 'MedRAG Worker (queue)' -WorkDir $backend -Command "uv run pipeline-worker$reloadFlag"
 Write-Ok 'API / embedding / worker 已分别在独立窗口启动'
 
 # ── 3. 前端 ───────────────────────────────────────────────

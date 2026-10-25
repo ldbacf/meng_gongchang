@@ -34,9 +34,22 @@
 
 .\scripts\dev.ps1 -NoDocker     # 基础设施已在跑
 .\scripts\dev.ps1 -NoFrontend   # 只起后端
+.\scripts\dev.ps1 -NoReload     # 关掉热重载
 
 .\scripts\dev-stop.ps1          # 停止（-IncludeDocker 连基础设施一起停）
 ```
+
+### 热重载
+
+默认开启，改 `backend/app/**` 下代码自动重启：
+
+| 进程 | 方式 | 说明 |
+|---|---|---|
+| API | `--reload` | uvicorn 走子进程重载；该路径下 uvicorn 正好返回 `SelectorEventLoop`，psycopg async 仍可用 |
+| worker | `--reload` | watchfiles **重启整个进程**（不是热替换模块），避免残留半截队列状态 |
+| embedding | 无 | bge-m3 加载约 30s，重载得不偿失；改相关代码手动重启 |
+
+> 手动等价：`uv run medrag-api --reload` / `uv run pipeline-worker --reload`
 
 ### 手动启动：共 4 个进程
 

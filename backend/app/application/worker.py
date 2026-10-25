@@ -105,11 +105,40 @@ async def run_worker():
     log.info("worker 已停止")
 
 
-def main() -> None:
-    """独立进程入口（Windows 需 SelectorEventLoop 供 psycopg async）。"""
+def _run_once() -> None:
+    """跑一遍消费循环（Windows 需 SelectorEventLoop 供 psycopg async）。"""
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(run_worker())
+
+
+def main() -> None:
+    """独立进程入口。
+
+    `--reload` 用 watchfiles 监视 `backend/app`，改动后**重启整个进程**
+    （不是热替换模块）—— 消费循环里持有队列连接与图状态，就地重载会留下半截状态。
+
+    ```bash
+    uv run pipeline-worker --reload
+    ```
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(description="MedRAG 文档处理 worker")
+    ap.add_argument("--reload", action="store_true", help="改代码自动重启（仅本地开发）")
+    args = ap.parse_args()
+
+    if not args.reload:
+        _run_once()
+        return
+
+    from watchfiles import run_process
+
+    from pathlib import Path
+
+    app_dir = Path(__file__).resolve().parent.parent  # backend/app
+    print(f"[worker] reload 已开启，监视 {app_dir}")
+    run_process(app_dir, target=_run_once, target_type="function")
 
 
 if __name__ == "__main__":
