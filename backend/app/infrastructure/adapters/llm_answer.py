@@ -211,11 +211,17 @@ def answer_stream(
 async def answer_stream_async(
     user_prompt: str,
     kb_kind: KBKind = KBKind.MEDICAL_DEFAULT,
+    system_prompt: str | None = None,
 ):
     """流式回答（async）→ 逐 token yield；**LLM 异常上抛**（不产 `[错误:...]`）。 供 QAGraph answer 节点用（C8：async 图 + async LLM 流式，不阻塞 event loop）。
     失败交给 error_handler 产 `t:error`，而非把错误拼进正文（A-4.4 修复）。
+
+    `system_prompt` 非空时覆盖默认提示词（「直答」用 DIRECT_SYSTEM_PROMPT，
+    因为默认提示词强制"只用文献回答"，会让寒暄也答不出来）。
     """
-    sys_prompt = GENERIC_SYSTEM_PROMPT if kb_kind is KBKind.GENERIC else SYSTEM_PROMPT
+    sys_prompt = system_prompt or (
+        GENERIC_SYSTEM_PROMPT if kb_kind is KBKind.GENERIC else SYSTEM_PROMPT
+    )
     chat = _chat_model(streaming=True)
     stream = chat.astream([
         SystemMessage(content=sys_prompt),

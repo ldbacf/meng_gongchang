@@ -78,7 +78,9 @@ def test_metrics_single_source_fields():
     assert fusion_step["metrics"]["model"] == "Qwen3-Reranker-4B"
 
     ans_step = build_rag_step("answer", elapsed_ms=4, context_chunks=5, total_tokens=100, total_elapsed_ms=400)
-    assert set(ans_step["metrics"].keys()) == {"model", "context_chunks", "total_tokens", "total_elapsed_ms", "degraded"}
+    assert set(ans_step["metrics"].keys()) == {"model", "context_chunks", "total_tokens", "total_elapsed_ms", "route", "degraded"}
+    # route: retrieval（走过检索）/ direct（意图判定库外，直答）
+    assert ans_step["metrics"]["route"] == "retrieval"
     # 断言**跟随配置**而非某个字面量：曾因这里写死 "DeepSeek-V4-Pro" 而实际模型早已是
     # `deepseek-v4-flash`，导致 UI 谎报所用模型。改成字面量只会把同一个坑再埋一次。
     from app.infrastructure.settings import get_settings

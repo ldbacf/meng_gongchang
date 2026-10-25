@@ -144,9 +144,19 @@ class GenerationAdapter:
         )
 
     def stream(
-        self, user_prompt: str, kb_kind: KBKind = KBKind.MEDICAL_DEFAULT
+        self,
+        user_prompt: str,
+        kb_kind: KBKind = KBKind.MEDICAL_DEFAULT,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[str]:
-        return _answer_module().answer_stream_async(user_prompt, kb_kind)
+        mod = _answer_module()
+        if system_prompt is None:
+            # 不传时保持原有调用形状（测试里对 answer_stream_async 的 monkeypatch
+            # 可能只接受两个位置参数）
+            return mod.answer_stream_async(user_prompt, kb_kind)
+        return mod.answer_stream_async(
+            user_prompt, kb_kind, system_prompt=system_prompt
+        )
 
 
 class IndexWriteAdapter:
