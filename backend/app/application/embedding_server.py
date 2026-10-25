@@ -109,7 +109,16 @@ def run() -> None:
     """`embedding-server` 脚本入口（uvicorn 起服务，端口 8084）。"""
     import uvicorn
 
-    uvicorn.run("app.application.embedding_server:app", host="0.0.0.0", port=8084)
+    # 与 API/worker 共用 JSON 日志；log_config=None 避免 uvicorn 覆盖
+    from app.infrastructure.observability.logger import setup_logging
+
+    setup_logging()
+    uvicorn.run(
+        "app.application.embedding_server:app",
+        host="0.0.0.0",
+        port=8084,
+        log_config=None,
+    )
 
 
 if __name__ == "__main__":
