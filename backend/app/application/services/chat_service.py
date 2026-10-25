@@ -59,6 +59,29 @@ class ChatService:
     async def _prepare(self, req, user) -> dict:
         conv_id = await self._ensure_conversation(req, user)
         kb = await self._resolve_kb(req.kb_id)
+
+        # ── 重新生成：替换某条 AI 回答 ──────────────────────────
+        #
+        # 与普通提问的差别只有两点：
+        #   1. **不落库新的用户消息** —— 原来那条提问已经在库里，重发会变成重复提问
+        #   2. 生成完成后删除被替换的那条 AI 消息（在 persist 里与新消息同一事务完成，
+        #      生成失败则旧回答保留，不会出现"旧的删了新的也没出来"）
+        #
+        # `query` 仍由前端带上（它知道上一条用户提问），后端不反查，避免再多一次查询。
+        replace_id = getattr(req, "regenerate_message_id", None)
+        if replace_id:
+            await self._assert_regenerable(conv_id, replace_id)
+            history = await self._read_history(conv_id, exclude_id=replace_id)
+            return {
+                "message_id": str(uuid.uuid4()),
+                "conversation_id": str(conv_id),
+                "user_id": str(user.id),
+                "query": req.message,
+                "kb": kb,
+                "history": history,
+                "replace_message_id": replace_id,
+            }
+
         user_msg_id = str(uuid.uuid4())
         await self._persist_user_message(conv_id, user_msg_id, req.message)
         history = await self._read_history(conv_id, exclude_id=user_msg_id)
@@ -70,6 +93,24 @@ class ChatService:
             "kb": kb,
             "history": history,
         }
+
+    async def _assert_regenerable(self, conv_id: uuid.UUID, message_id: str) -> None:
+        """校验被替换的消息：必须属于该会话，且是 AI 消息。"""
+        try:
+            mid = uuid.UUID(message_id)
+        except (ValueError, AttributeError):
+            raise HTTPException(400, "regenerate_message_id 格式无效")
+        async with self._c.get_db_sessionmaker()() as session:
+            r = await session.execute(
+                select(Message).where(
+                    Message.id == mid, Message.conversation_id == conv_id
+                )
+            )
+            msg = r.scalar_one_or_none()
+        if msg is None:
+            raise HTTPException(404, "要重新生成的消息不存在")
+        if msg.role != "ai":
+            raise HTTPException(400, "只能对 AI 回答重新生成")
 
     async def _ensure_conversation(self, req, user) -> uuid.UUID:
         async with self._c.get_db_sessionmaker()() as session:
