@@ -26,18 +26,29 @@ from dataclasses import dataclass
 #: 判定为「不需要检索」的覆盖度取值
 DIRECT_COVERAGES: frozenset[str] = frozenset({"out_of_domain"})
 
+#: rerank top1 低于此分 → 视为「库内证据不足」，转直答。
+#: 默认 0.25：实测高覆盖问题 top1≈0.90、低覆盖但仍相关的≈0.53；
+#: 0.25 以下基本是"只有零星字面匹配"的噪声区。可由 Settings 覆盖。
+MIN_EVIDENCE_SCORE: float = 0.25
+
 
 @dataclass(frozen=True)
 class RouteDecision:
-    """路由结果。"""
+    """路由结果。
+
+    `on_true` / `on_false` 是条件边的目标节点名 —— intent 之后与 fusion 之后
+    要去的节点不同（retrieval vs cite），所以由调用方指定。
+    """
 
     use_retrieval: bool
     reason: str
+    on_true: str = "retrieval"
+    on_false: str = "direct_answer"
 
     @property
     def target(self) -> str:
         """条件边的目标节点名。"""
-        return "retrieval" if self.use_retrieval else "direct_answer"
+        return self.on_true if self.use_retrieval else self.on_false
 
 
 def decide_route(*, coverage: str | None, degraded: bool = False) -> RouteDecision:
@@ -53,3 +64,28 @@ def decide_route(*, coverage: str | None, degraded: bool = False) -> RouteDecisi
         return RouteDecision(True, "coverage_unknown")
 
     return RouteDecision(True, f"coverage={cov}")
+
+
+def decide_after_fusion(
+    *,
+    top_score: float | None,
+    has_content: bool,
+    min_score: float = MIN_EVIDENCE_SCORE,
+) -> RouteDecision:
+    """fusion 之后：库内证据够不够用来回答。
+
+    只在**已经走完检索**时调用。`low` 覆盖度本身不触发 —— 低覆盖也可能检索到
+    真正相关的片段（实测 top1≈0.53），不能因为"领域冷门"就直接放弃文献。
+
+    - 没有任何带正文的片段 → 直答（reason=`no_content`）
+    - top1 低于阈值       → 直答（reason=`low_score:<分数>`）
+    - 否则                → 继续 cite → answer
+    """
+    if not has_content:
+        return RouteDecision(False, "no_content", on_true="cite")
+
+    score = float(top_score or 0.0)
+    if score < min_score:
+        return RouteDecision(False, f"low_score:{score:.3f}", on_true="cite")
+
+    return RouteDecision(True, f"score_ok:{score:.3f}", on_true="cite")

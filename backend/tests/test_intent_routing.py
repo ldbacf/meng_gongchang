@@ -112,7 +112,7 @@ def test_direct_answer_emits_no_citations():
 def test_direct_answer_marks_route():
     """answer 步 metrics 带 route=direct，便于统计多少提问没走检索。"""
     src = inspect.getsource(da_mod.direct_answer)
-    assert 'route="direct"' in src
+    assert "route=reason" in src
 
 
 def test_answer_metrics_has_route_field():
@@ -120,3 +120,113 @@ def test_answer_metrics_has_route_field():
 
     metrics = build_rag_step("answer").get("metrics") or {}
     assert metrics.get("route") == "retrieval", "检索路径的默认 route 应是 retrieval"
+
+# ── fusion 之后：证据不足转直答 ─────────────────────────────
+
+
+def test_low_score_goes_direct():
+    """top1 低于阈值 → 直答（而不是拿无关片段硬答）。"""
+    from app.domain.rag.routing import decide_after_fusion
+
+    d = decide_after_fusion(top_score=0.08, has_content=True)
+    assert d.use_retrieval is False
+    assert d.target == "direct_answer"
+    assert d.reason.startswith("low_score:")
+
+
+def test_score_above_threshold_continues():
+    from app.domain.rag.routing import decide_after_fusion
+
+    d = decide_after_fusion(top_score=0.53, has_content=True)
+    assert d.use_retrieval is True
+    assert d.target == "cite"
+
+
+def test_no_content_goes_direct():
+    from app.domain.rag.routing import decide_after_fusion
+
+    d = decide_after_fusion(top_score=0.9, has_content=False)
+    assert d.target == "direct_answer"
+    assert d.reason == "no_content"
+
+
+def test_threshold_boundary():
+    from app.domain.rag.routing import decide_after_fusion
+
+    assert decide_after_fusion(top_score=0.249, has_content=True).target == "direct_answer"
+    assert decide_after_fusion(top_score=0.251, has_content=True).target == "cite"
+
+
+def test_threshold_configurable():
+    from app.domain.rag.routing import decide_after_fusion
+
+    # 阈值调高到 0.6 后，0.53 的也算证据不足
+    d = decide_after_fusion(top_score=0.53, has_content=True, min_score=0.6)
+    assert d.target == "direct_answer"
+
+
+def test_route_after_fusion_reads_reranked():
+    """条件边直接从 state.reranked 取最高分与是否有正文。"""
+    from app.application.graphs.rag import rag_graph
+
+    class Hit:
+        def __init__(self, score, content="x"):
+            self.score_rerank = score
+            self.content = content
+
+    assert rag_graph.route_after_fusion({"reranked": [Hit(0.9)]}) == "cite"
+    assert rag_graph.route_after_fusion({"reranked": [Hit(0.05)]}) == "direct_answer"
+    assert rag_graph.route_after_fusion({"reranked": [Hit(0.9, content="")]}) == "direct_answer"
+    assert rag_graph.route_after_fusion({"reranked": []}) == "direct_answer"
+
+
+def test_graph_has_conditional_edge_from_fusion():
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    edges = {(e.source, e.target) for e in graph_mod.build_rag_graph(InMemorySaver()).get_graph().edges}
+    assert ("fusion", "cite") in edges
+    assert ("fusion", "direct_answer") in edges
+
+
+# ── 直答原因与声明 ─────────────────────────────────────────
+
+
+def test_resolve_reason_out_of_domain():
+    assert da_mod.resolve_reason({"rag_steps": {"intent": {}}}) == "out_of_domain"
+
+
+def test_resolve_reason_no_content():
+    state = {"rag_steps": {"retrieval": {}}, "reranked": [type("H", (), {"content": ""})()]}
+    assert da_mod.resolve_reason(state) == "no_content"
+
+
+def test_resolve_reason_low_evidence():
+    state = {"rag_steps": {"retrieval": {}}, "reranked": [type("H", (), {"content": "x"})()]}
+    assert da_mod.resolve_reason(state) == "low_evidence"
+
+
+def test_low_evidence_has_server_side_disclaimer():
+    """声明由服务端追加，不赌模型是否照做。"""
+    assert "未引用本知识库文献" in da_mod.DISCLAIMERS["low_evidence"]
+    assert "未引用本知识库文献" in da_mod.DISCLAIMERS["no_content"]
+    assert da_mod.DISCLAIMERS["out_of_domain"] == ""
+
+
+def test_low_evidence_uses_different_prompt():
+    src = inspect.getsource(da_mod.direct_answer)
+    assert "LOW_EVIDENCE_SYSTEM_PROMPT" in src
+
+
+def test_rerank_degraded_always_continues():
+    """精排降级时分数不可信 —— 若照常套阈值，每次提问都会转直答，检索被废掉。"""
+    from app.application.graphs.rag import rag_graph
+
+    class Hit:
+        score_rerank = 0.0
+        content = "有正文但没分数"
+
+    state = {
+        "reranked": [Hit()],
+        "rag_steps": {"fusion": {"metrics": {"degraded": True}}},
+    }
+    assert rag_graph.route_after_fusion(state) == "cite"

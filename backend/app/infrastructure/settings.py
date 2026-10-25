@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     #: 走 Settings 而非 os.getenv —— 项目红线：app/ 内不直接读环境变量。
     log_level: str = "INFO"
 
+    # ── RAG 路由 ────────────────────────────────────────────────
+    #: rerank 第一名低于此分 → 视为「库内证据不足」，改用通用知识直答。
+    #: 设为 0 可关闭该逻辑（只保留 out_of_domain 与「检索无正文」两种情况）。
+    rag_min_evidence_score: float = 0.25
+
     # ── PostgreSQL ──────────────────────────────────────────────
     postgres_host: str = "localhost"
     postgres_port: int = 5432
