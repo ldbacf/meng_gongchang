@@ -119,6 +119,17 @@ const hasRagSteps = computed(() => {
 
 const stepCount = computed(() => Object.values(props.message.ragSteps ?? {}).filter(Boolean).length)
 
+/**
+ * 步骤区标题。
+ *
+ * 意图判定为库外（寒暄/元问题）时后端走「直答」分支，只有 intent + answer 两步，
+ * 这时再写「检索与推理过程」会误导 —— 根本没检索。
+ */
+const stepsTitle = computed(() => {
+  const hasRetrieval = Boolean(props.message.ragSteps?.retrieval)
+  return `${hasRetrieval ? '检索与推理过程' : '推理过程'} · ${stepCount.value} 步`
+})
+
 const isProcessing = computed(() => {
   const steps = props.message.ragSteps
   if (!steps) return false
@@ -179,7 +190,7 @@ const stepsOpen = ref(true)
           <span v-else class="h-3 w-3 animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
 
           <span v-if="isProcessing" class="font-medium text-accent-text">{{ currentPhrase }}</span>
-          <span v-else>检索与推理过程 · {{ stepCount }} 步</span>
+          <span v-else>{{ stepsTitle }}</span>
 
           <ChevronDown
             :size="13"

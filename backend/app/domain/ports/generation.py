@@ -43,7 +43,14 @@ class AnswerPort(Protocol):
     ) -> str: ...
 
     def stream(
-        self, user_prompt: str, kb_kind: KBKind = KBKind.MEDICAL_DEFAULT
+        self,
+        user_prompt: str,
+        kb_kind: KBKind = KBKind.MEDICAL_DEFAULT,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[str]:
-        """逐 token 产出；失败上抛（由 service 层产 t:error）。"""
+        """逐 token 产出；失败上抛（由 service 层产 t:error）。
+
+        `system_prompt` 为空时按 `kb_kind` 选默认提示词。「直答」（意图判定为库外）
+        传入 `DIRECT_SYSTEM_PROMPT`，覆盖默认的"只用文献回答"约束。
+        """
         ...

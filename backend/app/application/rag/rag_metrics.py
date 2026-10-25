@@ -66,6 +66,7 @@ def _fusion_metrics(
 
 def _answer_metrics(
     *, context_chunks=0, total_tokens=0, total_elapsed_ms=0, degraded=False,
+    route="retrieval",
 ) -> dict:
     """answer 步 metrics。`model` **取自配置**（`settings.deepseek_answer_model`）。
 
@@ -80,6 +81,7 @@ def _answer_metrics(
         "context_chunks": context_chunks,
         "total_tokens": total_tokens,
         "total_elapsed_ms": total_elapsed_ms,
+        "route": route,
         "degraded": degraded,
     }
 
