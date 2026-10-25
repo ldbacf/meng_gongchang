@@ -23,6 +23,33 @@ const { startStream, abort: abortSSE } = useSSE()
 const messagesContainer = ref<HTMLElement | null>(null)
 const messagesLoading = ref(false)
 
+/**
+ * 是否「贴着底部」——决定新内容到来时要不要自动滚到底。
+ *
+ * 用户主动往上翻看历史时不该被拽回来，所以只有贴着底部（阈值 80px）才跟随。
+ */
+const stickToBottom = ref(true)
+
+function onMessagesScroll() {
+  const el = messagesContainer.value
+  if (!el) return
+  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+}
+
+/**
+ * 滚到底部。
+ *
+ * 之前用的是 `messagesContainer.lastElementChild.scrollIntoView()` —— 消息区外层
+ * 包了一个 760px 居中的容器后，`lastElementChild` 就是**整块容器**本身，
+ * `scrollIntoView` 会把它「顶部对齐视口顶部」，于是每次发消息都跳回开头。
+ * 直接改 `scrollTop` 才符合语义。
+ */
+function scrollToBottom(smooth = true) {
+  const el = messagesContainer.value
+  if (!el) return
+  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+}
+
 const streamMessage = {
   id: 'streaming',
   role: 'ai' as const,
@@ -177,7 +204,9 @@ watch(
         await chatStore.selectConversation(newId)
         messagesLoading.value = false
         await nextTick()
-        messagesContainer.value?.lastElementChild?.scrollIntoView()
+        // 切会话：直接落到底部（新会话默认看最新一条），不要平滑动画
+        stickToBottom.value = true
+        scrollToBottom(false)
       }
     } else {
       chatStore.currentConversationId = null
@@ -207,9 +236,10 @@ watch(
   () => [chatStore.messages.length, chatStore.streamContent],
   async () => {
     await nextTick()
-    messagesContainer.value?.lastElementChild?.scrollIntoView({
-      behavior: 'smooth',
-    })
+    if (!stickToBottom.value) return
+    // 流式期间用即时滚动：平滑滚动途中会产生「还没到底」的中间 scroll 事件，
+    // 被 onMessagesScroll 判成「用户上翻了」→ 下一次更新就不再跟，滚动会半路停住。
+    scrollToBottom(!chatStore.isStreaming)
   },
 )
 
@@ -258,6 +288,8 @@ async function handleSend(content: string) {
   }
 
   chatStore.addUserMessage(content)
+  // 主动发消息：无论之前是否往上翻，都跟到底部
+  stickToBottom.value = true
   startQuestion(content)
 }
 
@@ -294,6 +326,7 @@ async function handleRegenerate(message: { id: string }) {
   }
 
   chatStore.removeMessage(message.id)
+  stickToBottom.value = true
   startQuestion(question, { regenerateMessageId: message.id })
 }
 </script>
@@ -302,7 +335,7 @@ async function handleRegenerate(message: { id: string }) {
   <div class="relative flex h-full overflow-hidden">
     <div class="flex min-w-0 flex-1 flex-col">
       <!-- 消息区 -->
-      <div ref="messagesContainer" class="flex-1 overflow-y-auto">
+      <div ref="messagesContainer" class="flex-1 overflow-y-auto" @scroll.passive="onMessagesScroll">
         <!-- 空状态 -->
         <EmptyState
           v-if="!chatStore.currentConversationId && !showStreaming && !messagesLoading"
