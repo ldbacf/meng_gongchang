@@ -27,21 +27,24 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
-    path: '/admin/knowledge',
-    name: 'KnowledgeBase',
-    component: () => import('@/views/KnowledgeBaseView.vue'),
+    path: '/admin',
+    name: 'Admin',
+    component: () => import('@/views/AdminView.vue'),
     meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  // 旧入口保留为跳转：入口已改为「头像菜单 → 设置 → /admin」
+  {
+    path: '/admin/knowledge',
+    redirect: { path: '/admin', query: { tab: 'knowledge' } },
+  },
+  {
+    path: '/admin/users',
+    redirect: { path: '/admin', query: { tab: 'users' } },
   },
   {
     path: '/admin/knowledge/:kbId',
     name: 'KnowledgeBaseDetail',
     component: () => import('@/views/KnowledgeBaseDetailView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true },
-  },
-  {
-    path: '/admin/users',
-    name: 'UserManagement',
-    component: () => import('@/views/UserManagementView.vue'),
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   {

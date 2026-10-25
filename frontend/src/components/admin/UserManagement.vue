@@ -30,12 +30,9 @@ const stats = computed(() => ({
 
 <template>
   <div class="flex h-full flex-col overflow-hidden">
-    <!-- 页头 -->
-    <div class="border-b border-line px-8 pb-5 pt-2">
-      <h1 class="text-[22px] font-semibold tracking-[-.3px]">用户管理</h1>
-      <p class="mt-1 text-[13px] text-muted">管理系统用户、角色与访问权限</p>
-
-      <div class="mt-5 flex flex-wrap items-center gap-2.5">
+    <!-- 统计与工具栏（标题由外层「后台管理」页签提供） -->
+    <div class="border-b border-line px-8 pb-5 pt-4">
+      <div class="flex flex-wrap items-center gap-2.5">
         <span class="rounded-full border border-line bg-surface-2 px-3 py-1 text-[12px] text-ink-2">
           共 <b class="font-semibold text-ink">{{ stats.total }}</b> 个用户
         </span>

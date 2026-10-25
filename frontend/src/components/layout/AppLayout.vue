@@ -3,6 +3,14 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { PanelLeft, Sun, Moon, Share2 } from 'lucide-vue-next'
 import Sidebar from './Sidebar.vue'
 
+/**
+ * `bare`：只渲染内容，不渲染侧栏/顶栏外壳。
+ *
+ * 给「后台管理」这类**自身已经是子页面**的场景用 —— 否则会套两层 AppLayout
+ * （侧栏套侧栏、顶栏套顶栏）。
+ */
+withDefaults(defineProps<{ bare?: boolean }>(), { bare: false })
+
 const isCollapsed = ref(false)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
@@ -25,7 +33,10 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="flex h-screen overflow-hidden bg-canvas text-ink">
+  <!-- bare：外层已经有完整布局，这里只透传内容 -->
+  <slot v-if="bare" />
+
+  <div v-else class="flex h-screen overflow-hidden bg-canvas text-ink">
     <!-- Sidebar：宽度过渡，收起时整块移出 -->
     <div
       class="shrink-0 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(.2,.7,.3,1)]"
