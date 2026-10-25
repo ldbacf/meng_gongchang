@@ -26,26 +26,30 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/ChatView.vue'),
     meta: { requiresAuth: true },
   },
+  // 后台是**独立界面**：自己的左侧导航，不套聊天侧栏。
+  // 入口在头像菜单「设置」，也可直接访问 /admin。
   {
     path: '/admin',
-    name: 'Admin',
-    component: () => import('@/views/AdminView.vue'),
+    component: () => import('@/components/layout/AdminLayout.vue'),
     meta: { requiresAuth: true, requiresAdmin: true },
-  },
-  // 旧入口保留为跳转：入口已改为「头像菜单 → 设置 → /admin」
-  {
-    path: '/admin/knowledge',
-    redirect: { path: '/admin', query: { tab: 'knowledge' } },
-  },
-  {
-    path: '/admin/users',
-    redirect: { path: '/admin', query: { tab: 'users' } },
-  },
-  {
-    path: '/admin/knowledge/:kbId',
-    name: 'KnowledgeBaseDetail',
-    component: () => import('@/views/KnowledgeBaseDetailView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true },
+    children: [
+      { path: '', redirect: { name: 'KnowledgeBase' } },
+      {
+        path: 'knowledge',
+        name: 'KnowledgeBase',
+        component: () => import('@/views/KnowledgeBaseView.vue'),
+      },
+      {
+        path: 'knowledge/:kbId',
+        name: 'KnowledgeBaseDetail',
+        component: () => import('@/views/KnowledgeBaseDetailView.vue'),
+      },
+      {
+        path: 'users',
+        name: 'UserManagement',
+        component: () => import('@/views/UserManagementView.vue'),
+      },
+    ],
   },
   {
     path: '/',

@@ -30,15 +30,9 @@ const stats = computed(() => ({
 
 <template>
   <div class="flex h-full flex-col overflow-hidden">
-    <!-- 统计与工具栏（标题由外层「后台管理」页签提供） -->
-    <div class="border-b border-line px-8 pb-5 pt-4">
+    <!-- 工具栏（总数/管理员数在页面页头，这里只留筛选与搜索） -->
+    <div class="border-b border-line px-8 pb-4 pt-1">
       <div class="flex flex-wrap items-center gap-2.5">
-        <span class="rounded-full border border-line bg-surface-2 px-3 py-1 text-[12px] text-ink-2">
-          共 <b class="font-semibold text-ink">{{ stats.total }}</b> 个用户
-        </span>
-        <span class="rounded-full border border-line bg-surface-2 px-3 py-1 text-[12px] text-ink-2">
-          管理员 <b class="font-semibold text-ink">{{ stats.admin }}</b>
-        </span>
         <span
           v-if="stats.disabled"
           class="rounded-full border border-line bg-warn-soft px-3 py-1 text-[12px] text-warn"
