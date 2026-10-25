@@ -20,6 +20,9 @@ from app.infrastructure.container import AppContainer
 from app.interface.deps import set_container
 from app.infrastructure.db.models import DocumentTask, KnowledgeBase, TaskStatus
 
+# 需要真实 PG：isolated_db 建独立临时库（不碰开发库）。
+pytestmark = pytest.mark.usefixtures("isolated_db")
+
 _SAMPLE_MD = "# 1 引言\n\n测试文档正文。\n"
 
 
