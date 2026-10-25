@@ -31,7 +31,9 @@ function closeMenu() {
   menuOpen.value = false
 }
 
-/** 设置 = 后台管理；普通用户没有后台，菜单里就不显示该项。 */
+/**
+ * 设置 = 后台管理（独立界面，左侧有自己的管理导航）；普通用户没有后台，菜单里就不显示该项。
+ */
 function goSettings() {
   closeMenu()
   if (isAdmin.value) router.push('/admin')
