@@ -64,6 +64,10 @@ def main() -> None:
         # loop="none" → uvicorn 不接管事件循环，asyncio.run 回落到上面设的 policy。
         # 用默认的 "auto"/"asyncio" 会被 uvicorn 硬编码成 ProactorEventLoop（见模块 docstring）。
         loop="none",
+        # log_config=None → 不让 uvicorn 用它自己的 LOGGING_CONFIG 覆盖我们的 JSON 日志。
+        # 否则它会在 import 之后把 uvicorn.access 重设回 INFO，输出非 JSON 的
+        # `INFO: 127.0.0.1 - "GET ... 200 OK"`，和业务日志混在一起、还把真正的日志淹掉。
+        log_config=None,
     )
 
 

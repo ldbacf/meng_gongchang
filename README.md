@@ -24,24 +24,52 @@
 
 ## 🚀 快速开始
 
-前置条件：Python ≥ 3.10（推荐 3.12）、Node.js ≥ 18、Docker & Docker Compose。
+前置条件：Python ≥ 3.12、Node.js ≥ 18、Docker & Docker Compose。
+
+### 一键启动（推荐）
+
+```powershell
+# 基础设施 + 3 个后端进程 + 前端，各占一个窗口，日志实时可见
+.\scripts\dev.ps1
+
+.\scripts\dev.ps1 -NoDocker     # 基础设施已在跑
+.\scripts\dev.ps1 -NoFrontend   # 只起后端
+
+.\scripts\dev-stop.ps1          # 停止（-IncludeDocker 连基础设施一起停）
+```
+
+### 手动启动：共 4 个进程
+
+| 服务 | 命令 | 端口 | 为什么需要独立进程 |
+|---|---|---|---|
+| 基础设施 | `docker compose up -d`（`backend/`） | 5432 / 6379 / 9000 / 9200 / 19530 | PostgreSQL、Redis、MinIO、ES、Milvus |
+| **API** | `uv run medrag-api` | 8000 | 只做 HTTP + SSE，必须随时可响应 |
+| **Embedding** | `uv run embedding-server` | 8084 | bge-m3 常驻，模型只加载一次；API 与 worker 共用，重启 API 不用重载模型（约 30s） |
+| **Worker** | `uv run pipeline-worker` | — | 消费 Redis Stream，跑 MinerU 解析 + 切分 + 向量化 + 写库；单个 PDF 可达数分钟，**不能放在请求链路里** |
+| 前端 | `npm run dev` | 5171 | Vite 开发服务器（仅开发期需要） |
 
 ```bash
-# 1. 启动基础设施（PostgreSQL / Redis / MinIO / ES / Milvus 等）
 cd backend && docker compose up -d
-
-# 2. 配置环境变量
-cp .env.example .env   # 填入 DEEPSEEK_API_KEY / SILICONFLOW_API_KEY / MINERU_TOKENS
-
-# 3. 后端（conda + uv）
-source D:/anaconda/Scripts/activate rag_test
+cp .env.example .env          # DEEPSEEK_API_KEY / SILICONFLOW_API_KEY / MINERU_TOKENS
 uv sync
-uv run python scripts/init_es.py && uv run python scripts/init_milvus.py
-uv run uvicorn src.main:app --reload --port 8000
-
-# 4. 前端
-cd frontend && npm install && npm run dev   # http://localhost:5173
+uv run medrag-init-es && uv run medrag-init-milvus    # 仅首次（会重建索引，别重复跑）
 ```
+
+> 前端固定 **5171**：5173 落在 Windows 保留端口段无法绑定；后端 CORS 默认按 5171 配置。
+
+### 日志
+
+三个后端进程共用同一套 JSON 日志（每行一个 JSON 对象）：
+
+```json
+{"level":"INFO","ts":"...","msg":"请求","logger":"app.access",
+ "ctx":{"method":"GET","path":"/api/v1/conversations","status":200,"ms":42.1}}
+```
+
+- 默认 `INFO`：只打业务日志与请求日志，`/health` `/metrics` 等探针**静默**（否则会刷屏）
+- `LOG_LEVEL=debug`：连探针与第三方库细节一起打
+- 慢请求（>3s）与 5xx 自动升级为 `WARNING`，异常带完整 traceback
+- uvicorn 自带的访问日志已关闭（信息量只有状态码），由 [app/interface/middleware.py](backend/app/interface/middleware.py) 取代
 
 > 详细安装步骤见 [backend/README.md](backend/README.md) 与 [frontend/README.md](frontend/README.md)。
 

@@ -74,11 +74,16 @@ async def _process_job(job) -> str:
 async def run_worker():
     """消费循环（claim → 图 → ack）。"""
     from app.infrastructure.container import get_container
+    from app.infrastructure.observability.logger import get_logger, setup_logging
+
+    # 与 API 共用同一套 JSON 日志（原先用 print，格式和级别都与另两个进程不一致）
+    setup_logging()
+    log = get_logger("app.worker")
 
     container = get_container()
+    log.info("worker 启动，等待任务…")
     await container.start()
     queue = container.get_queue()
-    print("[Worker] 启动，等待任务...")
 
     try:
         while True:
@@ -86,16 +91,18 @@ async def run_worker():
                 job = await queue.claim(timeout=5)
                 if job is None:
                     continue
+                log.info("收到任务", extra={"ctx": {"entry_id": job.entry_id}})
                 await _process_job(job)
                 await queue.ack(job.entry_id)
+                log.info("任务完成并 ack", extra={"ctx": {"entry_id": job.entry_id}})
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"[Worker] 异常: {e}")
+                log.error("消费异常，5s 后重试: %s", e, exc_info=True)
                 await asyncio.sleep(5)
     finally:
         await container.close()
-    print("[Worker] 已停止")
+    log.info("worker 已停止")
 
 
 def main() -> None:

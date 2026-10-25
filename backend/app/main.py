@@ -24,6 +24,7 @@ from app.infrastructure.db.models import DocumentTask, TaskStatus
 from app.infrastructure.db.session import async_session
 from app.infrastructure.key_manager import get_key_manager
 from app.infrastructure.settings import get_settings
+from app.interface.middleware import RequestLogMiddleware
 
 
 @asynccontextmanager
@@ -131,6 +132,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 访问日志：每个请求一行 JSON（含 method/path/status/耗时）。
+# uvicorn 自带的访问日志只有状态码、格式也不同，故在入口处替换。
+app.add_middleware(RequestLogMiddleware)
 
 
 # ── 注册路由 ──────────────────────────────────────────────

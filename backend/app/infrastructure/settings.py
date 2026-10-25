@@ -22,6 +22,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # ── 日志 ────────────────────────────────────────────────────
+    #: 日志级别（debug/info/warning/error），三个后端进程共用。
+    #: 走 Settings 而非 os.getenv —— 项目红线：app/ 内不直接读环境变量。
+    log_level: str = "INFO"
+
     # ── PostgreSQL ──────────────────────────────────────────────
     postgres_host: str = "localhost"
     postgres_port: int = 5432
