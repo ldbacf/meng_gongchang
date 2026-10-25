@@ -92,6 +92,10 @@ class ChatSendRequest(BaseModel):
     message: str
     conversation_id: str | None = None
     kb_id: str | None = None
+    #: 「重新生成」时传被替换的那条 AI 消息 id。
+    #: 带上它表示：复用 `message`（原提问）重新回答，**不新建用户消息**，
+    #: 并在新回答落库的同一事务里删掉这条旧回答。
+    regenerate_message_id: str | None = None
 
 
 class CitationSchema(BaseModel):

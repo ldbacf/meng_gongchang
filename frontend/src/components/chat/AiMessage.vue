@@ -12,11 +12,14 @@ const props = defineProps<{
   message: Message
   isStreaming?: boolean
   streamContent?: string
+  /** 只有最后一条 AI 回答允许重新生成（历史回答重生成会让后面对话失去上下文） */
+  canRegenerate?: boolean
 }>()
 
 const emit = defineEmits<{
   'citation-click': [citation: Citation]
   'show-citation-list': []
+  regenerate: []
 }>()
 
 const { render } = useMarkdown()
@@ -223,7 +226,12 @@ const stepsOpen = ref(true)
           <Copy v-else :size="12" />
           复制
         </button>
-        <button class="inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] text-muted transition-colors hover:bg-surface hover:text-ink">
+        <button
+          v-if="canRegenerate"
+          class="inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] text-muted transition-colors hover:bg-surface hover:text-ink"
+          title="用同一个问题重新回答（旧回答会被替换）"
+          @click="emit('regenerate')"
+        >
           <RotateCw :size="12" />
           重新生成
         </button>

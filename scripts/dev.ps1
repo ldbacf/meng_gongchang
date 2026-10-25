@@ -22,7 +22,8 @@
 param(
     [switch]$NoDocker,
     [switch]$NoFrontend,
-    [switch]$NoReload
+    [switch]$NoReload,
+    [switch]$Restart
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,12 +58,36 @@ $ports = @{ 5432 = 'PostgreSQL'; 6379 = 'Redis'; 9000 = 'MinIO' }
 foreach ($p in $ports.Keys) {
     $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $deadline) {
-        if (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue) {
+        # Docker Desktop(WSL2) 的端口是转发而非本地 LISTEN，
+        # Get-NetTCPConnection 查不到 —— 必须用真实 TCP 连接。
+        if (Test-NetConnection -ComputerName 127.0.0.1 -Port $p -InformationLevel Quiet -WarningAction SilentlyContinue) {
             Write-Ok "端口 $p ($($ports[$p])) 就绪"
             break
         }
         Start-Sleep -Milliseconds 800
     }
+}
+
+# ── 2. 端口预检：已经被占就不再起一份（否则只会报 Errno 10048）──
+function Get-PortPid {
+    param([int]$Port)
+    $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($c) { return $c.OwningProcess }
+    return $null
+}
+
+if ($Restart) {
+    Write-Step '先停止已有进程（-Restart）'
+    & (Join-Path $PSScriptRoot 'dev-stop.ps1')
+}
+
+function Assert-PortFree {
+    param([int]$Port, [string]$Name)
+    $procId = Get-PortPid -Port $Port
+    if (-not $procId) { return $true }
+    Write-Host "    $Name 的端口 $Port 已被 pid=$procId 占用 —— 跳过启动" -ForegroundColor Yellow
+    Write-Host "    （很可能已经在运行；要重启请用 .\scripts\dev.ps1 -Restart）" -ForegroundColor DarkGray
+    return $false
 }
 
 # ── 2. 后端三个进程，各占一个窗口 ─────────────────────────
@@ -85,13 +110,17 @@ Write-Step '启动后端进程'
 $reloadFlag = if ($NoReload) { '' } else { ' --reload' }
 if ($NoReload) { Write-Host '    （已关闭热重载）' -ForegroundColor DarkGray }
 
-Start-Window -Title 'MedRAG API :8000' -WorkDir $backend -Command "uv run medrag-api$reloadFlag"
-Start-Sleep -Milliseconds 400
+if (Assert-PortFree -Port 8000 -Name 'API') {
+    Start-Window -Title 'MedRAG API :8000' -WorkDir $backend -Command "uv run medrag-api$reloadFlag"
+    Start-Sleep -Milliseconds 400
+}
 # embedding 常驻 bge-m3：重载会重载模型（~30s），默认不挂 --reload，改了 embedding 相关代码手动重启它
-Start-Window -Title 'MedRAG Embedding :8084' -WorkDir $backend -Command 'uv run embedding-server'
-Start-Sleep -Milliseconds 400
+if (Assert-PortFree -Port 8084 -Name 'Embedding') {
+    Start-Window -Title 'MedRAG Embedding :8084' -WorkDir $backend -Command 'uv run embedding-server'
+    Start-Sleep -Milliseconds 400
+}
 Start-Window -Title 'MedRAG Worker (queue)' -WorkDir $backend -Command "uv run pipeline-worker$reloadFlag"
-Write-Ok 'API / embedding / worker 已分别在独立窗口启动'
+Write-Ok '后端进程已处理（占用端口的已跳过）'
 
 # ── 3. 前端 ───────────────────────────────────────────────
 if (-not $NoFrontend) {
@@ -101,8 +130,10 @@ if (-not $NoFrontend) {
         Push-Location $frontend
         try { npm install --legacy-peer-deps } finally { Pop-Location }
     }
-    Start-Window -Title 'MedRAG Frontend :5171' -WorkDir $frontend -Command 'npm run dev'
-    Write-Ok '前端已启动'
+    if (Assert-PortFree -Port 5171 -Name 'Frontend') {
+        Start-Window -Title 'MedRAG Frontend :5171' -WorkDir $frontend -Command 'npm run dev'
+        Write-Ok '前端已启动'
+    }
 }
 
 # ── 4. 汇总 ───────────────────────────────────────────────

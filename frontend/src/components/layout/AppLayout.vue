@@ -51,14 +51,6 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
           <PanelLeft :size="18" />
         </button>
 
-        <button
-          class="inline-flex items-center gap-2 rounded-full border border-line px-3 py-[7px] text-[13px] font-medium text-ink-2 transition-colors hover:bg-surface hover:border-line-strong"
-        >
-          <span class="h-[7px] w-[7px] rounded-full bg-[linear-gradient(100deg,var(--grad-1),var(--grad-2),var(--grad-3))]" />
-          MedRAG 2.0
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6" /></svg>
-        </button>
-
         <div class="flex-1" />
 
         <button

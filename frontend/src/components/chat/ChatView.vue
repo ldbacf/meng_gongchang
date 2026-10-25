@@ -215,21 +215,28 @@ watch(
 
 // ── Send message ──
 
-async function handleSend(content: string) {
-  if (!chatStore.currentConversationId) {
-    await chatStore.createConversation(content.slice(0, 30) + (content.length > 30 ? '...' : ''))
-  }
-
-  chatStore.addUserMessage(content)
+/**
+ * 发起一次流式请求。
+ *
+ * `regenerateMessageId` 非空表示「重新生成」：复用 `content`（原提问）重新回答，
+ * 后端不会新建用户消息，并在新回答落库时删掉被替换的那条。
+ */
+function startQuestion(
+  content: string,
+  opts: { regenerateMessageId?: string } = {},
+) {
   chatStore.startStreaming()
+
+  const body: Record<string, unknown> = {
+    conversation_id: chatStore.currentConversationId,
+    message: content,
+    kb_id: adminStore.activeKbId,
+  }
+  if (opts.regenerateMessageId) body.regenerate_message_id = opts.regenerateMessageId
 
   startStream(
     '/api/v1/chat/stream',
-    {
-      conversation_id: chatStore.currentConversationId,
-      message: content,
-      kb_id: adminStore.activeKbId,
-    },
+    body,
     (msg) => {
       chatStore.handleStreamMsg(msg)
     },
@@ -237,8 +244,57 @@ async function handleSend(content: string) {
       console.error('SSE error:', err)
       toastStore.error('流式连接失败: ' + (err.message || '未知错误'))
       chatStore.isStreaming = false
+      // 重新生成失败：本地已移除了旧回答，从服务端拉回真实状态
+      if (opts.regenerateMessageId && chatStore.currentConversationId) {
+        chatStore.selectConversation(chatStore.currentConversationId)
+      }
     },
   )
+}
+
+async function handleSend(content: string) {
+  if (!chatStore.currentConversationId) {
+    await chatStore.createConversation(content.slice(0, 30) + (content.length > 30 ? '...' : ''))
+  }
+
+  chatStore.addUserMessage(content)
+  startQuestion(content)
+}
+
+/** 最近一条 AI 回答的 id —— 只有它能「重新生成」 */
+const lastAiMessageId = computed(() => {
+  for (let i = chatStore.messages.length - 1; i >= 0; i--) {
+    if (chatStore.messages[i].role === 'ai') return chatStore.messages[i].id
+  }
+  return null
+})
+
+/**
+ * 重新生成：找到这条 AI 回答**前面最近的一条用户提问**，用它重发。
+ *
+ * - 本地先移除旧回答（视觉上立即让位给流式气泡）
+ * - 服务端在新回答落库的同一事务里删除旧回答；失败则保留，前端会回拉一次消息列表
+ */
+async function handleRegenerate(message: { id: string }) {
+  if (chatStore.isStreaming) return
+
+  const idx = chatStore.messages.findIndex((m) => m.id === message.id)
+  if (idx < 0) return
+
+  let question = ''
+  for (let i = idx - 1; i >= 0; i--) {
+    if (chatStore.messages[i].role === 'user') {
+      question = chatStore.messages[i].content
+      break
+    }
+  }
+  if (!question) {
+    toastStore.error('找不到对应的提问，无法重新生成')
+    return
+  }
+
+  chatStore.removeMessage(message.id)
+  startQuestion(question, { regenerateMessageId: message.id })
 }
 </script>
 
@@ -272,8 +328,10 @@ async function handleSend(content: string) {
               <template v-for="msg in chatStore.messages" :key="msg.id">
                 <MessageBubble
                   :message="msg"
+                  :can-regenerate="!chatStore.isStreaming && msg.id === lastAiMessageId"
                   @citation-click="handleCitationClick"
                   @show-citation-list="showCitationList"
+                  @regenerate="handleRegenerate(msg)"
                 />
               </template>
             </TransitionGroup>

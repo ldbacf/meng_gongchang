@@ -27,6 +27,10 @@ async def persist(state: dict) -> dict:
     cid_uuid = uuid.UUID(cid)
     mid_uuid = uuid.UUID(mid)
 
+    # 「重新生成」：被替换的旧回答与新回答在**同一事务**里删/增。
+    # 生成失败时本节点不会执行（走 _on_error），旧回答因此保留 —— 不会"旧的删了新的没出来"。
+    replace_id = state.get("replace_message_id")
+
     async with get_container().get_db_sessionmaker()() as session:
         existing = await session.execute(select(Message).where(Message.id == mid_uuid))
         ai = existing.scalar_one_or_none()
@@ -40,6 +44,21 @@ async def persist(state: dict) -> dict:
             ai.content = answer_text
             ai.citations = citations
             ai.rag_steps = rag_steps
+
+        if replace_id:
+            try:
+                old_uuid = uuid.UUID(str(replace_id))
+            except (ValueError, AttributeError):
+                old_uuid = None
+            if old_uuid and old_uuid != mid_uuid:
+                old_r = await session.execute(
+                    select(Message).where(
+                        Message.id == old_uuid, Message.conversation_id == cid_uuid
+                    )
+                )
+                old_msg = old_r.scalar_one_or_none()
+                if old_msg is not None:
+                    await session.delete(old_msg)
 
         conv_r = await session.execute(select(Conversation).where(Conversation.id == cid_uuid))
         conv = conv_r.scalar_one_or_none()

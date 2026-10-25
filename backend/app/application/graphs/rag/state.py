@@ -18,6 +18,8 @@ class QaState(TypedDict, total=False):
     query: str
     kb: dict  # {kb_id, es_index, milvus_collection, kb_kind}
     history: list  # [{role, content}] 回答 10 turns / 意图 2 turns
+    #: 「重新生成」时被替换的旧 AI 消息 id；persist 节点与新回答同事务删除它
+    replace_message_id: str | None
     # 处理中间态
     rewritten_query: str
     expanded_query: str | None

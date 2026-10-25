@@ -111,6 +111,12 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** 本地移除一条消息（「重新生成」时先撤下旧回答；服务端会在新回答落库时删除它） */
+  function removeMessage(id: string) {
+    const i = messages.value.findIndex((m) => m.id === id)
+    if (i >= 0) messages.value.splice(i, 1)
+  }
+
   function startStreaming() {
     _pendingFinish = null
     streamComplete.value = false
@@ -280,6 +286,7 @@ export const useChatStore = defineStore('chat', () => {
     deleteConversation,
     renameConversation,
     addUserMessage,
+    removeMessage,
     startStreaming,
     appendStreamContent,
     addStreamCitation,
