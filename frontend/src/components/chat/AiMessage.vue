@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { Citation, Message } from '@/types'
 import { useMarkdown } from '@/composables/useMarkdown'
-import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import RagPipelineSimple from './RagPipelineSimple.vue'
+import { RAG_STEPS, currentRunningStep } from '@/constants/ragSteps'
 import { Copy, Check, ThumbsUp, RotateCw, BookOpen, ChevronDown, AlertCircle } from 'lucide-vue-next'
 
 const chatStore = useChatStore()
@@ -136,30 +137,23 @@ const isProcessing = computed(() => {
   return Object.values(steps).some((s) => s?.status === 'pending')
 })
 
-// ── 处理中的文案轮换 ──
-
-const statusPhrases = ['正在理解问题…', '检索文献中…', '分析医学资料…', '梳理临床信息…', '生成医学回答…']
-const currentPhrase = ref(statusPhrases[0])
-let phraseTimer: ReturnType<typeof setInterval> | undefined
-let lastIndex = -1
-
-function pickPhrase() {
-  let i: number
-  do { i = Math.floor(Math.random() * statusPhrases.length) } while (i === lastIndex && statusPhrases.length > 1)
-  lastIndex = i
-  currentPhrase.value = statusPhrases[i]
-}
-
-function startRotation() {
-  pickPhrase()
-  if (!phraseTimer) phraseTimer = setInterval(pickPhrase, 2200)
-}
-function stopRotation() {
-  if (phraseTimer) { clearInterval(phraseTimer); phraseTimer = undefined }
-}
-
-watch(isProcessing, (p) => (p ? startRotation() : stopRotation()), { immediate: true })
-onBeforeUnmount(stopRotation)
+/**
+ * 待答标题。
+ *
+ * 以前这里是 5 句文案每 2.2 秒**随机**轮换（「正在理解问题…」「检索文献中…」
+ * 「分析医学资料…」…），跟实际执行到哪一步毫无关系 —— 用户看到「检索文献中…」
+ * 时可能其实还在做意图识别。现在直接取后端 `pending` 的那一步，
+ * 与下方步骤列表永远一致。
+ *
+ * 四步都答完了但流式正文还没吐完时退化为「生成医学回答中」，
+ * 因为此时 `answer` 节点正在往外发 token。
+ */
+const processingLabel = computed(() => {
+  const key = currentRunningStep(props.message.ragSteps)
+  const def = RAG_STEPS.find((d) => d.key === key)
+  // answer 之后若仍有残留帧（极端时序），按「生成中」处理而不是空字符串
+  return (def?.doing ?? RAG_STEPS[3].doing) + '…'
+})
 
 // ── 步骤展开 ──
 
@@ -189,7 +183,7 @@ const stepsOpen = ref(true)
           <svg v-if="!isProcessing" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.4l1.9 5.1 5.1 1.9-5.1 1.9L12 16.4l-1.9-5.1L5 9.4l5.1-1.9z" /></svg>
           <span v-else class="h-3 w-3 animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
 
-          <span v-if="isProcessing" class="font-medium text-accent-text">{{ currentPhrase }}</span>
+          <span v-if="isProcessing" class="font-medium text-accent-text">{{ processingLabel }}</span>
           <span v-else>{{ stepsTitle }}</span>
 
           <ChevronDown
