@@ -3,15 +3,13 @@ import type { RagSteps, RagStep } from '@/types'
 import { isStepDone, normalizeStepStatus } from '@/types/step'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
+import { RAG_STEPS } from '@/constants/ragSteps'
 
 const props = defineProps<{ steps: RagSteps }>()
 
-const DEFS = [
-  { key: 'intent', label: '意图识别', sub: 'Query Rewriting' },
-  { key: 'retrieval', label: '混合检索', sub: 'Hybrid Search' },
-  { key: 'fusion', label: '融合重排', sub: 'Reranking' },
-  { key: 'answer', label: '生成回答', sub: 'Answer' },
-] as const
+// 步骤定义（顺序 / 中英标签）与 AiMessage 的待答文案共用 `constants/ragSteps`，
+// 两处各写一份迟早会漂移。
+const DEFS = RAG_STEPS
 
 type StepKey = (typeof DEFS)[number]['key']
 
