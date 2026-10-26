@@ -293,7 +293,8 @@ async def get_document_by_md5(
         return task
 
 
-@router.api_route("/{doc_id}/pdf/stream", methods=["GET", "HEAD"])
+@router.head("/{doc_id}/pdf/stream", name="stream_document_pdf_head")
+@router.get("/{doc_id}/pdf/stream", name="stream_document_pdf")
 async def stream_document_pdf(
     doc_id: str,
     request: Request,
@@ -307,6 +308,12 @@ async def stream_document_pdf(
     **同时支持 HEAD**：pdf.js 会先用 HEAD 探测 `Content-Length` 与 `Accept-Ranges`，
     再决定是否分片拉取。只声明 GET 时 HEAD 会 405，pdf.js 就退回"整份下载"，
     分片加载失效（前端表现为要等整份 PDF 到齐才开始渲染）。
+
+    **HEAD 单独一个装饰器**（而不是 `api_route(methods=["GET","HEAD"])`）：
+    FastAPI 的默认 `generate_unique_id` 只用 `route.methods` 里的**第一个**方法名
+    拼 operationId，一条路由挂两个方法会让 GET/HEAD 的 ID 完全相同。
+    OpenAPI 里出现重复 operationId → `openapi-typescript` 生成的类型直接
+    TS2300（重复标识符），整个前端类型检查失败。拆开后函数体仍只写一份。
     """
     bucket = get_settings().minio_raw_bucket
     client = get_container().get_minio().client

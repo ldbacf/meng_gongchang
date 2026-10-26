@@ -49,53 +49,55 @@ function backToChat() {
       <!-- 品牌 -->
       <div class="flex items-center gap-2.5 px-4 pb-4 pt-4">
         <div
-          class="grid h-7 w-7 place-items-center rounded-lg text-[13px] font-bold text-white shadow-[0_2px_8px_rgba(66,133,244,.35)]"
+          class="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-[13px] font-bold text-white shadow-[0_2px_8px_rgba(66,133,244,.35)]"
           style="background: linear-gradient(100deg, var(--grad-1), var(--grad-2), var(--grad-3))"
         >
           M
         </div>
-        <div class="leading-tight">
+        <div class="min-w-0 leading-tight">
           <div class="text-[15px] font-semibold tracking-[.2px]">MedRAG</div>
           <div class="text-[11px] text-muted">后台管理</div>
         </div>
       </div>
 
       <!-- 返回对话 -->
-      <div class="px-3 pb-3">
+      <div class="px-2">
         <button
-          class="flex w-full items-center gap-2 rounded-full border border-line bg-surface-2 px-3.5 py-2 text-[13px] text-ink-2 transition-colors hover:bg-hover"
+          class="flex h-9 w-full items-center gap-2.5 rounded-full border border-line bg-surface-2 px-3.5 text-[13px] text-ink-2 transition-colors hover:bg-hover"
           @click="backToChat"
         >
-          <ArrowLeft :size="15" />
+          <ArrowLeft :size="14" class="shrink-0" />
           返回对话
         </button>
       </div>
 
-      <!-- 导航 -->
-      <div class="px-2">
-        <div class="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[.4px] text-faint">
+      <!-- 导航：组间 mt-5 与上方拉开，组内 space-y-0.5 靠近 -->
+      <nav class="mt-5 px-2">
+        <div class="mb-1.5 px-2.5 text-[11px] font-semibold uppercase tracking-[.4px] text-faint">
           管理
         </div>
-        <RouterLink
-          v-for="item in NAV"
-          :key="item.key"
-          :to="item.to"
-          class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] transition-colors"
-          :class="
-            activeKey === item.key
-              ? 'bg-accent-soft font-medium text-accent-text'
-              : 'text-ink-2 hover:bg-hover hover:text-ink'
-          "
-        >
-          <component :is="item.icon" :size="15" />
-          {{ item.label }}
-        </RouterLink>
-      </div>
+        <div class="space-y-0.5">
+          <RouterLink
+            v-for="item in NAV"
+            :key="item.key"
+            :to="item.to"
+            class="flex h-9 items-center gap-2.5 rounded-full px-2.5 text-[13.5px] transition-colors"
+            :class="
+              activeKey === item.key
+                ? 'bg-accent-soft font-medium text-accent-text'
+                : 'text-ink-2 hover:bg-hover hover:text-ink'
+            "
+          >
+            <component :is="item.icon" :size="14" class="shrink-0" />
+            {{ item.label }}
+          </RouterLink>
+        </div>
+      </nav>
 
       <div class="flex-1" />
 
       <!-- 当前账号 -->
-      <div class="flex items-center gap-2.5 border-t border-line px-4 py-3">
+      <div class="flex items-center gap-2.5 border-t border-line px-3 py-2">
         <div
           class="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[12px] font-semibold text-white"
           style="background: linear-gradient(100deg, var(--grad-1), var(--grad-2), var(--grad-3))"
@@ -107,7 +109,7 @@ function backToChat() {
           <div class="text-[11px] text-muted">管理员</div>
         </div>
         <button
-          class="grid h-7 w-7 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-hover hover:text-ink"
+          class="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-hover hover:text-ink"
           :title="isDark ? '切换到浅色' : '切换到深色'"
           @click="toggleTheme"
         >
@@ -115,7 +117,7 @@ function backToChat() {
           <Moon v-else :size="15" />
         </button>
         <button
-          class="grid h-7 w-7 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-danger-soft hover:text-danger"
+          class="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-danger-soft hover:text-danger"
           title="退出登录"
           @click="logout"
         >

@@ -291,23 +291,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/metrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Metrics */
-        get: operations["metrics_metrics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/documents": {
         parameters: {
             query?: never;
@@ -342,23 +325,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/documents/{doc_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Document Status */
-        get: operations["get_document_status_api_v1_documents__doc_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/documents/md5/{md5}": {
         parameters: {
             query?: never;
@@ -366,7 +332,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Document By Md5 */
+        /**
+         * Get Document By Md5
+         * @description 按 md5 查文档状态。
+         *
+         *     路径声明必须在 `/{doc_id}` 之前，否则 `md5` 会被 doc_id（uuid）吃掉。
+         */
         get: operations["get_document_by_md5_api_v1_documents_md5__md5__get"];
         put?: never;
         post?: never;
@@ -389,8 +360,69 @@ export interface paths {
          *
          *     从 MinIO 读取 PDF 直接流式返回（不再暴露 presigned URL）。`Range: bytes=x-y`
          *     → `206 Partial Content` + `Content-Range`；越界 → 416；无 Range → 200 全量。
+         *
+         *     **同时支持 HEAD**：pdf.js 会先用 HEAD 探测 `Content-Length` 与 `Accept-Ranges`，
+         *     再决定是否分片拉取。只声明 GET 时 HEAD 会 405，pdf.js 就退回"整份下载"，
+         *     分片加载失效（前端表现为要等整份 PDF 到齐才开始渲染）。
+         *
+         *     **HEAD 单独一个装饰器**（而不是 `api_route(methods=["GET","HEAD"])`）：
+         *     FastAPI 的默认 `generate_unique_id` 只用 `route.methods` 里的**第一个**方法名
+         *     拼 operationId，一条路由挂两个方法会让 GET/HEAD 的 ID 完全相同。
+         *     OpenAPI 里出现重复 operationId → `openapi-typescript` 生成的类型直接
+         *     TS2300（重复标识符），整个前端类型检查失败。拆开后函数体仍只写一份。
          */
         get: operations["stream_document_pdf_api_v1_documents__doc_id__pdf_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        /**
+         * Stream Document Pdf Head
+         * @description 代理 PDF 内容流（支持 Range 断点，T-5.6）。
+         *
+         *     从 MinIO 读取 PDF 直接流式返回（不再暴露 presigned URL）。`Range: bytes=x-y`
+         *     → `206 Partial Content` + `Content-Range`；越界 → 416；无 Range → 200 全量。
+         *
+         *     **同时支持 HEAD**：pdf.js 会先用 HEAD 探测 `Content-Length` 与 `Accept-Ranges`，
+         *     再决定是否分片拉取。只声明 GET 时 HEAD 会 405，pdf.js 就退回"整份下载"，
+         *     分片加载失效（前端表现为要等整份 PDF 到齐才开始渲染）。
+         *
+         *     **HEAD 单独一个装饰器**（而不是 `api_route(methods=["GET","HEAD"])`）：
+         *     FastAPI 的默认 `generate_unique_id` 只用 `route.methods` 里的**第一个**方法名
+         *     拼 operationId，一条路由挂两个方法会让 GET/HEAD 的 ID 完全相同。
+         *     OpenAPI 里出现重复 operationId → `openapi-typescript` 生成的类型直接
+         *     TS2300（重复标识符），整个前端类型检查失败。拆开后函数体仍只写一份。
+         */
+        head: operations["stream_document_pdf_head_api_v1_documents__doc_id__pdf_stream_head"];
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{doc_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Document Status */
+        get: operations["get_document_status_api_v1_documents__doc_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Metrics */
+        get: operations["metrics_metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -463,6 +495,8 @@ export interface components {
             conversation_id?: string | null;
             /** Kb Id */
             kb_id?: string | null;
+            /** Regenerate Message Id */
+            regenerate_message_id?: string | null;
         };
         /** CitationSchema */
         CitationSchema: {
@@ -612,13 +646,34 @@ export interface components {
             citations?: components["schemas"]["CitationSchema"][] | null;
             /** Rag Steps */
             rag_steps?: {
-                [key: string]: unknown;
+                [key: string]: components["schemas"]["RagStepSchema"];
             } | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * RagStepSchema
+         * @description RAG 步骤的响应形状。
+         *
+         *     `status` 走 `StepStatus` 枚举，但配了 **before 校验器**：历史数据里的
+         *     `completed` / `success` / `error` 在**读取边界**归一，而不是让整个请求 500。
+         *
+         *     为什么不直接严格拒绝：`GET /conversations/{id}/messages` 返回整个消息列表，
+         *     只要有一条老消息带 `completed`，该会话就彻底打不开。归一 + 告警是更稳妥的取舍。
+         */
+        RagStepSchema: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed" | "skipped";
+            /** Title */
+            title: string;
+            /** Summary */
+            summary?: string | null;
         };
         /** RefreshRequest */
         RefreshRequest: {
@@ -1419,26 +1474,6 @@ export interface operations {
             };
         };
     };
-    metrics_metrics_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
     upload_document_api_v1_documents_post: {
         parameters: {
             query?: never;
@@ -1494,37 +1529,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskCreateResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_document_status_api_v1_documents__doc_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                doc_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1596,6 +1600,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_document_pdf_head_api_v1_documents__doc_id__pdf_stream_head: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_status_api_v1_documents__doc_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    metrics_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
