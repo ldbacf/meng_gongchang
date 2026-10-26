@@ -48,23 +48,30 @@ def test_suffix_range():
 # ── 路由契约：GET + HEAD ────────────────────────────────────────
 
 
-def _pdf_route():
-    """取出 /pdf/stream 的 APIRoute 对象。"""
+def _pdf_route_methods() -> set[str]:
+    """汇总 /pdf/stream 上所有方法（GET 与 HEAD 是两条独立 APIRoute）。"""
     from app.main import app
 
+    methods: set[str] = set()
     for r in app.routes:
         if getattr(r, "path", "").endswith("/pdf/stream"):
-            return r
-    return None
+            methods |= set(getattr(r, "methods", set()) or set())
+    return methods
 
 
 def test_pdf_stream_route_accepts_head():
-    """端点必须声明 HEAD。
+    """端点必须能响应 HEAD。
 
     回归：只声明 `@router.get` 时 HEAD 会 405，pdf.js 探测失败 → 退回整份下载，
     分片加载失效（前端表现为必须等整份 PDF 到齐才出第一页）。
+
+    注意 GET 与 HEAD 现在是**两条独立 APIRoute**：曾用
+    `@router.api_route(methods=["GET","HEAD"])` 一条挂两个方法，但那会让 FastAPI
+    的默认 `generate_unique_id` 只取第一个方法名，两个方法的 operationId 完全相同，
+    OpenAPI 出现重复 ID，`openapi-typescript` 生成的类型直接 TS2300、前端类型检查失败。
+    所以这里按「所有 /pdf/stream 路由的方法并集」判断，而不是只看第一条。
     """
-    route = _pdf_route()
-    assert route is not None, "未找到 /pdf/stream 路由"
-    assert "GET" in route.methods
-    assert "HEAD" in route.methods, "缺少 HEAD：pdf.js 无法探测 Size/Range 能力"
+    methods = _pdf_route_methods()
+    assert methods, "未找到 /pdf/stream 路由"
+    assert "GET" in methods
+    assert "HEAD" in methods, "缺少 HEAD：pdf.js 无法探测 Size/Range 能力"

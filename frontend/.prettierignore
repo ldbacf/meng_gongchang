@@ -1,0 +1,6 @@
+dist
+node_modules
+public
+package-lock.json
+skills-lock.json
+src/types/api.gen.ts

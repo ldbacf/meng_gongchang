@@ -1,17 +1,38 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
+/**
+ * 聊天主视图。
+ *
+ * 只负责**串联**：把 store、SSE、滚动跟随、引用面板接起来，并把消息列渲染出来。
+ * 具体逻辑分别在：
+ *   - `useStickToBottom` — 滚动跟随 / 不打扰 / 主动归位
+ *   - `useCitationPanel` — 右侧文献面板状态、引用去重、PDF 地址
+ *   - `stores/chat`       — 流式内容累积、逐字 reveal、消息落库同步
+ *
+ * 之前这些全挤在这一个文件里（418 行），改滚动要读一遍面板代码才敢动。
+ */
+import { ref, watch, onMounted, onUnmounted, computed, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
-import type { Citation } from '@/types'
+import type { Citation, Message } from '@/types'
 
 import { useSSE } from '@/composables/useSSE'
 import { useToastStore } from '@/stores/toast'
 import { useAdminStore } from '@/stores/admin'
+import { useStickToBottom } from '@/composables/useStickToBottom'
+import { useCitationPanel } from '@/composables/useCitationPanel'
 import ChatInput from './ChatInput.vue'
 import MessageBubble from './MessageBubble.vue'
 import EmptyState from './EmptyState.vue'
-import RightPanel from './RightPanel.vue'
 import { Library } from 'lucide-vue-next'
+
+/**
+ * 右侧文献面板异步加载。
+ *
+ * `RightPanel → PdfViewer → pdfjs-dist + pdf_viewer.css` 合计约 580 KB JS + 278 KB CSS。
+ * 原来静态 import，即使 `v-if` 从没打开过，这些也会全部打进 ChatView 主 chunk，
+ * 用户一进聊天页就要下载。改成异步后只在首次点开引用时才拉。
+ */
+const RightPanel = defineAsyncComponent(() => import('./RightPanel.vue'))
 
 const route = useRoute()
 const router = useRouter()
@@ -23,41 +44,58 @@ const { startStream, abort: abortSSE } = useSSE()
 const messagesContainer = ref<HTMLElement | null>(null)
 const messagesLoading = ref(false)
 
-/**
- * 是否「贴着底部」——决定新内容到来时要不要自动滚到底。
- *
- * 用户主动往上翻看历史时不该被拽回来，所以只有贴着底部（阈值 80px）才跟随。
- */
-const stickToBottom = ref(true)
+// ── 滚动跟随 ──
 
-function onMessagesScroll() {
-  const el = messagesContainer.value
-  if (!el) return
-  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+// watch 的触发源：消息条数 + 流式内容长度。只放这两个，
+// 不要把整个 messages 数组塞进去（引用变化会连带触发滚动）。
+const {
+  stickToBottom,
+  onScroll: onMessagesScroll,
+  forceBottom,
+} = useStickToBottom(messagesContainer, () => [
+  chatStore.messages.length,
+  chatStore.streamContent,
+])
+
+// ── 引用面板 ──
+
+const {
+  open: rightPanelOpen,
+  activeCitation,
+  pdfUrl,
+  pdfLoading,
+  showBackButton,
+  uniqueCitations,
+  pdfHeaders,
+  openCitation,
+  openList,
+  backToList,
+  close: closeRightPanel,
+} = useCitationPanel(computed(() => chatStore.messages))
+
+function handleCitationClick(citation: Citation) {
+  openCitation(citation)
 }
 
-/**
- * 滚到底部。
- *
- * 之前用的是 `messagesContainer.lastElementChild.scrollIntoView()` —— 消息区外层
- * 包了一个 760px 居中的容器后，`lastElementChild` 就是**整块容器**本身，
- * `scrollIntoView` 会把它「顶部对齐视口顶部」，于是每次发消息都跳回开头。
- * 直接改 `scrollTop` 才符合语义。
- */
-function scrollToBottom(smooth = true) {
-  const el = messagesContainer.value
-  if (!el) return
-  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+function showCitationList() {
+  openList()
 }
 
-const streamMessage = {
+function handlePanelSelectCitation(citation: Citation) {
+  // 从列表点进详情：保留「返回列表」
+  openCitation(citation, true)
+}
+
+// ── 流式气泡 ──
+
+const streamMessage: Message = {
   id: 'streaming',
-  role: 'ai' as const,
+  role: 'ai',
   content: '',
   timestamp: Date.now(),
 }
 
-const streamMessageWithRagSteps = computed(() => ({
+const streamMessageWithRagSteps = computed<Message>(() => ({
   ...streamMessage,
   ragSteps: chatStore.streamRagSteps,
   // 流式期间也要能点引用：citations 走 store 的累积数组
@@ -75,92 +113,6 @@ const showStreaming = computed(
     chatStore.isStreaming &&
     chatStore.streamingConversationId === chatStore.currentConversationId,
 )
-
-// ── Right panel state ──
-
-const rightPanelOpen = ref(false)
-const activeCitation = ref<Citation | null>(null)
-const pdfUrl = ref<string | null>(null)
-let _currentBlobUrl: string | null = null
-const pdfLoading = ref(false)
-const showBackButton = ref(false)
-
-const uniqueCitations = computed(() => {
-  // key 必须含消息 id：cite.id 是「该条回答内的序号」("1".."5")，跨消息会重复。
-  // 只用 id 做 key 会让多轮会话里第 2/3 轮的引用被第 1 轮的同号引用顶掉。
-  const map = new Map<string, Citation>()
-  for (const msg of chatStore.messages) {
-    for (const cite of msg.citations ?? []) {
-      const key = `${msg.id}:${cite.id}`
-      if (!map.has(key)) {
-        map.set(key, cite)
-      }
-    }
-  }
-  return Array.from(map.values())
-})
-
-function _setPdfUrl(url: string | null) {
-  if (_currentBlobUrl) {
-    URL.revokeObjectURL(_currentBlobUrl)
-    _currentBlobUrl = null
-  }
-  pdfUrl.value = url
-}
-
-/** pdf.js 走 Range 请求时的附加头（接口需 Bearer 鉴权）。 */
-const pdfHeaders = computed<Record<string, string>>(() => {
-  const token = localStorage.getItem('access_token')
-  const headers: Record<string, string> = {}
-  if (token) headers.Authorization = `Bearer ${token}`
-  return headers
-})
-
-async function loadPdfForCitation(citation: Citation) {
-  activeCitation.value = citation
-  rightPanelOpen.value = true
-  _setPdfUrl(null)
-
-  // 直接把接口 URL 交给 PdfViewer / pdf.js，由它按 Range 分片拉取。
-  // 曾先 axios 拿整份 blob 再渲染：2MB 要等约 8s 才出第一页（链路约 250 KB/s）。
-  if (citation.doc_id) {
-    pdfLoading.value = false
-    _setPdfUrl(`/api/v1/documents/${citation.doc_id}/pdf/stream`)
-    return
-  }
-
-  pdfLoading.value = true
-  _setPdfUrl(citation.pdfUrl ?? null)
-  pdfLoading.value = false
-}
-
-async function handleCitationClick(citation: Citation) {
-  showBackButton.value = false
-  await loadPdfForCitation(citation)
-}
-
-function showCitationList() {
-  showBackButton.value = true
-  activeCitation.value = null
-  _setPdfUrl(null)
-  rightPanelOpen.value = true
-}
-
-function closeRightPanel() {
-  rightPanelOpen.value = false
-  activeCitation.value = null
-  _setPdfUrl(null)
-}
-
-function goBackToList() {
-  activeCitation.value = null
-  _setPdfUrl(null)
-}
-
-function handlePanelSelectCitation(citation: Citation) {
-  showBackButton.value = true
-  loadPdfForCitation(citation)
-}
 
 // ── Lifecycle ──
 
@@ -197,16 +149,14 @@ function abortStreaming() {
 watch(
   () => route.params.id,
   async (newId) => {
-    // 不再 abort：切换到别的会话时让 SSE 继续跑，切回来还能看到进行中的回答
+    // 不 abort：切换到别的会话时让 SSE 继续跑，切回来还能看到进行中的回答
     if (newId && typeof newId === 'string') {
       if (chatStore.currentConversationId !== newId) {
         messagesLoading.value = true
         await chatStore.selectConversation(newId)
         messagesLoading.value = false
-        await nextTick()
         // 切会话：直接落到底部（新会话默认看最新一条），不要平滑动画
-        stickToBottom.value = true
-        scrollToBottom(false)
+        await forceBottom(false)
       }
     } else {
       chatStore.currentConversationId = null
@@ -232,17 +182,6 @@ watch(
   },
 )
 
-watch(
-  () => [chatStore.messages.length, chatStore.streamContent],
-  async () => {
-    await nextTick()
-    if (!stickToBottom.value) return
-    // 流式期间用即时滚动：平滑滚动途中会产生「还没到底」的中间 scroll 事件，
-    // 被 onMessagesScroll 判成「用户上翻了」→ 下一次更新就不再跟，滚动会半路停住。
-    scrollToBottom(!chatStore.isStreaming)
-  },
-)
-
 // ── Send message ──
 
 /**
@@ -251,10 +190,7 @@ watch(
  * `regenerateMessageId` 非空表示「重新生成」：复用 `content`（原提问）重新回答，
  * 后端不会新建用户消息，并在新回答落库时删掉被替换的那条。
  */
-function startQuestion(
-  content: string,
-  opts: { regenerateMessageId?: string } = {},
-) {
+function startQuestion(content: string, opts: { regenerateMessageId?: string } = {}) {
   chatStore.startStreaming()
 
   const body: Record<string, unknown> = {
@@ -335,7 +271,11 @@ async function handleRegenerate(message: { id: string }) {
   <div class="relative flex h-full overflow-hidden">
     <div class="flex min-w-0 flex-1 flex-col">
       <!-- 消息区 -->
-      <div ref="messagesContainer" class="flex-1 overflow-y-auto" @scroll.passive="onMessagesScroll">
+      <div
+        ref="messagesContainer"
+        class="flex-1 overflow-y-auto"
+        @scroll.passive="onMessagesScroll"
+      >
         <!-- 空状态 -->
         <EmptyState
           v-if="!chatStore.currentConversationId && !showStreaming && !messagesLoading"
@@ -392,11 +332,7 @@ async function handleRegenerate(message: { id: string }) {
         当前知识库 · <span class="font-medium text-muted">{{ adminStore.activeKb.name }}</span>
       </div>
 
-      <ChatInput
-        :streaming="chatStore.isStreaming"
-        @send="handleSend"
-        @stop="abortStreaming"
-      />
+      <ChatInput :streaming="chatStore.isStreaming" @send="handleSend" @stop="abortStreaming" />
     </div>
 
     <!-- 右侧文献面板（覆盖式滑出） -->
@@ -410,7 +346,7 @@ async function handleRegenerate(message: { id: string }) {
         :show-back-button="showBackButton"
         :pdf-headers="pdfHeaders"
         @close="closeRightPanel"
-        @back-to-list="goBackToList"
+        @back-to-list="backToList"
         @select-citation="handlePanelSelectCitation"
       />
     </Transition>

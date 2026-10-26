@@ -2,7 +2,13 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Conversation, Message, Citation, RagSteps, SSEMessage } from '@/types'
 import { normalizeStepStatus } from '@/types/step'
-import { fetchConversationsApi, createConversationApi, fetchMessagesApi, deleteConversationApi, renameConversationApi } from '@/api/chat'
+import {
+  fetchConversationsApi,
+  createConversationApi,
+  fetchMessagesApi,
+  deleteConversationApi,
+  renameConversationApi,
+} from '@/api/chat'
 
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<Conversation[]>([])
@@ -27,9 +33,7 @@ export const useChatStore = defineStore('chat', () => {
   const displayedLength = ref(0)
   let _revealTimer: ReturnType<typeof setInterval> | null = null
 
-  const revealedContent = computed(() =>
-    streamContent.value.slice(0, displayedLength.value),
-  )
+  const revealedContent = computed(() => streamContent.value.slice(0, displayedLength.value))
   const streamComplete = ref(false)
   let _pendingFinish: { messageId?: string; ragSteps?: RagSteps } | null = null
 
@@ -76,9 +80,14 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function deleteConversation(id: string) {
+    // 删除失败时必须保留本地条目：以前这里是空 catch，服务端还在、前端却已从
+    // 列表里抹掉，用户刷新后「删掉的会话又回来了」，且全程没有任何提示。
     try {
       await deleteConversationApi(id)
-    } catch {}
+    } catch (e) {
+      console.error('删除会话失败:', e)
+      throw e
+    }
     conversations.value = conversations.value.filter((c) => c.id !== id)
     if (currentConversationId.value === id) {
       currentConversationId.value = null
@@ -89,7 +98,9 @@ export const useChatStore = defineStore('chat', () => {
   async function renameConversation(id: string, title: string) {
     try {
       await renameConversationApi(id, title)
-    } catch { return }
+    } catch {
+      return
+    }
     const conv = conversations.value.find((c) => c.id === id)
     if (conv) {
       conv.title = title
@@ -247,10 +258,7 @@ export const useChatStore = defineStore('chat', () => {
     // v-html 整体替换 innerHTML，代价不低（详见 AiMessage.vue 注释）。
     _revealTimer = setInterval(() => {
       if (displayedLength.value < streamContent.value.length) {
-        displayedLength.value = Math.min(
-          displayedLength.value + 6,
-          streamContent.value.length,
-        )
+        displayedLength.value = Math.min(displayedLength.value + 6, streamContent.value.length)
       }
       if (streamComplete.value && displayedLength.value >= streamContent.value.length) {
         _stopReveal()
