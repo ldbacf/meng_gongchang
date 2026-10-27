@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import type { Citation, Message } from '@/types'
 import { useMarkdown } from '@/composables/useMarkdown'
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import RagPipelineSimple from './RagPipelineSimple.vue'
-import { RAG_STEPS, currentRunningStep } from '@/constants/ragSteps'
+import {
+  currentRunningStep,
+  splitCountTemplate,
+  stepHint,
+} from '@/constants/ragSteps'
+import type { StepHint } from '@/constants/ragSteps'
 import { Copy, Check, ThumbsUp, RotateCw, BookOpen, ChevronDown, AlertCircle } from 'lucide-vue-next'
 
 const chatStore = useChatStore()
@@ -137,23 +142,92 @@ const isProcessing = computed(() => {
   return Object.values(steps).some((s) => s?.status === 'pending')
 })
 
-/**
- * 待答标题。
- *
- * 以前这里是 5 句文案每 2.2 秒**随机**轮换（「正在理解问题…」「检索文献中…」
- * 「分析医学资料…」…），跟实际执行到哪一步毫无关系 —— 用户看到「检索文献中…」
- * 时可能其实还在做意图识别。现在直接取后端 `pending` 的那一步，
- * 与下方步骤列表永远一致。
- *
- * 四步都答完了但流式正文还没吐完时退化为「生成医学回答中」，
- * 因为此时 `answer` 节点正在往外发 token。
- */
-const processingLabel = computed(() => {
-  const key = currentRunningStep(props.message.ragSteps)
-  const def = RAG_STEPS.find((d) => d.key === key)
-  // answer 之后若仍有残留帧（极端时序），按「生成中」处理而不是空字符串
-  return (def?.doing ?? RAG_STEPS[3].doing) + '…'
+// ── 待答提示：时间尺度 + 实时计数 + 逐字 ──
+//
+// 以前这里是 5 句文案每 2.2 秒**随机**轮换，跟实际执行到哪一步毫无关系。
+// 现在：
+//   - 步骤准确：取 `ragSteps` 里 pending 的那一步
+//   - 混合检索 / 融合重排 优先显示**真实计数**（后端 live 进度帧），拿不到就退化
+//   - 文案按该步已耗时递进（时间尺度），不是固定一句
+//   - 文字逐字出现（90ms/字、blur 6px→0），比静态文字有生命感
+//
+// 计时器只在「当前步骤在跑」时开，100ms 一跳用于刷新已耗时；
+// 用 100ms 而不是 16ms（rAF）——耗时显示只到 0.1s 精度，没必要每帧重建 VDOM。
+
+const runningStep = computed(() => currentRunningStep(props.message.ragSteps))
+const stepElapsedMs = ref(0)
+let elapsedTimer: ReturnType<typeof setInterval> | undefined
+let stepStartAt = 0
+let lastStepKey: string | null = null
+
+watch(
+  [runningStep, () => props.isStreaming],
+  ([key, streaming]) => {
+    if (key && streaming) {
+      // 切到新步骤才重置起点；同一步内持续计时
+      if (key !== lastStepKey) {
+        lastStepKey = key
+        stepStartAt = Date.now()
+        stepElapsedMs.value = 0
+      }
+      if (!elapsedTimer) {
+        elapsedTimer = setInterval(() => {
+          stepElapsedMs.value = Date.now() - stepStartAt
+        }, 100)
+      }
+    } else {
+      if (elapsedTimer) {
+        clearInterval(elapsedTimer)
+        elapsedTimer = undefined
+      }
+      lastStepKey = null
+    }
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  if (elapsedTimer) clearInterval(elapsedTimer)
 })
+
+/** 该步最新的 metrics（live 进度或完成态都可能是） */
+const runningMetrics = computed(() => {
+  const steps = props.message.ragSteps
+  const key = runningStep.value
+  if (!steps || !key) return undefined
+  return (steps as Record<string, { metrics?: unknown } | undefined>)[key]?.metrics as
+    | Record<string, unknown>
+    | undefined
+})
+
+/** 当前提示：文案模板 + 计数 + 签名 */
+const hint = computed<StepHint | null>(() => {
+  const key = runningStep.value
+  if (!key) return null
+  return stepHint(key, stepElapsedMs.value, runningMetrics.value)
+})
+
+/**
+ * 逐字渲染的分片。
+ *
+ * 含计数时把 `{n}` 拆出去单独渲染成徽标 —— 这样数字变化不会重放整句的逐字动画
+ * （签名不变就不重建，见模板里的 `:key`）。
+ */
+const hintParts = computed<Array<{ type: 'text' | 'count'; value: string | number }>>(() => {
+  const h = hint.value
+  if (!h) return []
+  if (h.count == null) return [{ type: 'text', value: h.text }]
+  const segs = splitCountTemplate(h.text)
+  const out: Array<{ type: 'text' | 'count'; value: string | number }> = []
+  segs.forEach((seg, i) => {
+    if (seg) out.push({ type: 'text', value: seg })
+    if (i < segs.length - 1) out.push({ type: 'count', value: h.count as number })
+  })
+  return out
+})
+
+/** 逐字动画的 key：只随「文案结构」变化，不随数字变化 */
+const hintKey = computed(() => hint.value?.text ?? '')
 
 // ── 步骤展开 ──
 
@@ -183,7 +257,20 @@ const stepsOpen = ref(true)
           <svg v-if="!isProcessing" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.4l1.9 5.1 5.1 1.9-5.1 1.9L12 16.4l-1.9-5.1L5 9.4l5.1-1.9z" /></svg>
           <span v-else class="h-3 w-3 animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
 
-          <span v-if="isProcessing" class="font-medium text-accent-text">{{ processingLabel }}</span>
+          <!-- 待答提示：逐字出现 + 计数徽标（数字单独成块，不重放整句动画） -->
+          <span v-if="isProcessing" class="hint-text font-medium text-accent-text">
+            <template v-for="(part, pi) in hintParts" :key="hintKey + ':' + pi">
+              <template v-if="part.type === 'text'">
+                <span
+                  v-for="(ch, ci) in String(part.value)"
+                  :key="pi + '-' + ci"
+                  class="char-in"
+                  :style="{ animationDelay: ci * 22 + 'ms' }"
+                >{{ ch }}</span>
+              </template>
+              <span v-else class="hint-count">{{ part.value }}</span>
+            </template>
+          </span>
           <span v-else>{{ stepsTitle }}</span>
 
           <ChevronDown

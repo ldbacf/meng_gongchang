@@ -238,6 +238,36 @@
   will-change: filter, opacity;
 }
 
+/* ── 待答提示里的实时计数徽标 ─────────────────────────────── */
+/*
+ * 数字来自后端真实进度（ES 分批翻页 + 两路并行，见 infrastructure/search.py），
+ * 不是估算。数字变化时单独弹一下，不重放整句的逐字动画 —— 否则每来一帧
+ * 「已召回 12 篇」都要从第一个字开始打字，观感像卡带。
+ */
+.hint-count {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  margin: 0 1px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  animation: hint-count-pop 340ms var(--ease-spring-soft);
+}
+
+@keyframes hint-count-pop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+
+/* 数字只在首次出现和变化时弹；系统开启「减少动态效果」时全部关掉 */
+@media (prefers-reduced-motion: reduce) {
+  .hint-count { animation: none; }
+  .char-in { animation: none; }
+}
+
 /* ── 微交互：欠阻尼微弹（约弹簧 380/18）──────────────────── */
 /* 用在点赞、对勾、发送等"点了要有回应"的地方 */
 .spring-soft {

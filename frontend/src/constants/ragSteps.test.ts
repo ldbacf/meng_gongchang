@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { currentRunningStep, RAG_STEPS } from './ragSteps'
+import { currentRunningStep, RAG_STEPS, splitCountTemplate, stepHint } from './ragSteps'
 import type { RagSteps, RagStep } from '@/types'
 import type { StepStatus } from '@/types/step'
 
@@ -92,12 +92,90 @@ describe('RAG_STEPS', () => {
     ])
   })
 
-  it('每步都有 label / sub / doing，且 doing 不带省略号（由调用方统一补）', () => {
+  it('每步都有 label / sub', () => {
     for (const s of RAG_STEPS) {
       expect(s.label.length).toBeGreaterThan(0)
       expect(s.sub.length).toBeGreaterThan(0)
-      expect(s.doing.length).toBeGreaterThan(0)
-      expect(s.doing.endsWith('…')).toBe(false)
     }
+  })
+})
+
+// ══════════════════════════════════════════════════════════════
+// 待答文案：按步骤类型固定分配（计数 / 时间尺度）
+// ══════════════════════════════════════════════════════════════
+
+describe('stepHint — 计数与退化的分配规则', () => {
+  it('意图识别：只用时间尺度，永远不带计数', () => {
+    const a = stepHint('intent', 0, { live: true, milvus_hits: 99 })
+    expect(a.count).toBeNull()
+    expect(a.text).toBe('正在理解问题…')
+
+    const b = stepHint('intent', 2000, { live: true })
+    expect(b.count).toBeNull()
+    expect(b.text).toBe('正在补全医学上下文…')
+  })
+
+  it('生成回答：只用时间尺度，永远不带计数', () => {
+    expect(stepHint('answer', 0, { live: true }).count).toBeNull()
+    expect(stepHint('answer', 4000, { live: true }).text).toBe('正在收尾，确保每句都有出处…')
+  })
+
+  it('混合检索：拿到数字就显示计数', () => {
+    const h = stepHint('retrieval', 900, { live: true, fetched: 12 })
+    expect(h.count).toBe(12)
+    expect(h.text).toContain('{n}')
+  })
+
+  it('混合检索：没有数字时退化为过程描述（不显示「0 篇」）', () => {
+    const noLive = stepHint('retrieval', 900, undefined)
+    expect(noLive.count).toBeNull()
+    expect(noLive.text).toBe('两路结果正在汇合…')
+    expect(noLive.text).not.toContain('0')
+
+    // 计数为 0 时同样退化
+    const zero = stepHint('retrieval', 900, { live: true, fetched: 0 })
+    expect(zero.count).toBeNull()
+    expect(zero.text).toBe('两路结果正在汇合…')
+  })
+
+  it('融合重排：优先用精选数，没有则用候选数', () => {
+    const onlyInput = stepHint('fusion', 900, { live: true, input_count: 12 })
+    expect(onlyInput.count).toBe(12)
+
+    const withOutput = stepHint('fusion', 900, {
+      live: true,
+      input_count: 12,
+      output_count: 5,
+    })
+    expect(withOutput.count).toBe(5)
+  })
+
+  it('融合重排：没有数字时退化', () => {
+    const h = stepHint('fusion', 900, { live: true })
+    expect(h.count).toBeNull()
+    expect(h.text).toBe('重排模型逐条打分中…')
+  })
+
+  it('同一步内随耗时换句（时间尺度）', () => {
+    expect(stepHint('retrieval', 0, undefined).text).toBe('正在并行检索向量库与关键词索引…')
+    expect(stepHint('retrieval', 3000, undefined).text).toBe('正在按语义相似度去重…')
+  })
+
+  it('数字变化会改变 signature（触发重绘），文案不变则不会', () => {
+    const a = stepHint('retrieval', 900, { live: true, fetched: 12 })
+    const b = stepHint('retrieval', 950, { live: true, fetched: 12 })
+    const c = stepHint('retrieval', 950, { live: true, fetched: 200 })
+    expect(a.signature).toBe(b.signature)
+    expect(a.signature).not.toBe(c.signature)
+  })
+})
+
+describe('splitCountTemplate', () => {
+  it('把 {n} 拆成前后两段', () => {
+    expect(splitCountTemplate('已召回 {n} 条候选…')).toEqual(['已召回 ', ' 条候选…'])
+  })
+
+  it('无占位符时返回单段', () => {
+    expect(splitCountTemplate('正在理解问题…')).toEqual(['正在理解问题…'])
   })
 })

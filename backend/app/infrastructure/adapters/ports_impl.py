@@ -54,6 +54,7 @@ class SearchAdapter:
         es_top_k: int = 200,
         es_index: str | None = None,
         milvus_collection: str | None = None,
+        on_progress=None,
     ) -> tuple[list[SearchHit], list[SearchHit]]:
         return _search_module().recall_dual(
             query,
@@ -62,6 +63,7 @@ class SearchAdapter:
             es_top_k=es_top_k,
             es_index=es_index,
             milvus_collection=milvus_collection,
+            on_progress=on_progress,
         )
 
     def rerank(

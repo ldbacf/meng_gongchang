@@ -38,6 +38,53 @@ describe('chat store — SSE 帧处理', () => {
     s.stopReveal()
   })
 
+  it('live 进度帧的 metrics 必须保留（否则「已召回 N 篇」永远没有数据源）', () => {
+    const s = useChatStore()
+    s.startStreaming()
+
+    s.handleStreamMsg({
+      t: 'step',
+      k: 'retrieval',
+      s: 'pending',
+      title: '检索',
+      metrics: { live: true, stage: 'es', milvus_hits: 200, es_hits: 100, after_dedup: 300 },
+    } as never)
+
+    const step = s.streamRagSteps['retrieval']
+    expect(step).toBeDefined()
+    expect(step!.status).toBe('pending')
+    // 与上一条的区别：带 live 标记的 pending 帧是**真实进度**，不能丢。
+    // 曾一律 `s === 'done' ? metrics : undefined`，把实时计数整条链路掐断。
+    expect(step!.metrics).toMatchObject({
+      live: true,
+      stage: 'es',
+      es_hits: 100,
+      after_dedup: 300,
+    })
+
+    s.stopReveal()
+  })
+
+  it('live 帧后续更新会覆盖前一次的计数', () => {
+    const s = useChatStore()
+    s.startStreaming()
+
+    const push = (es: number) =>
+      s.handleStreamMsg({
+        t: 'step',
+        k: 'retrieval',
+        s: 'pending',
+        title: '检索',
+        metrics: { live: true, stage: 'es', es_hits: es, after_dedup: es },
+      } as never)
+
+    push(100)
+    push(200)
+
+    expect((s.streamRagSteps['retrieval']!.metrics as { es_hits: number }).es_hits).toBe(200)
+    s.stopReveal()
+  })
+
   it('done step 帧保留 metrics', () => {
     const s = useChatStore()
     s.startStreaming()

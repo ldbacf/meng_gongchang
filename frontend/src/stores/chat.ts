@@ -208,12 +208,21 @@ export const useChatStore = defineStore('chat', () => {
             title: msg.title,
             summary: msg.summary,
             elapsed_ms: msg.elapsed_ms,
-            // pending 帧的 metrics 是 `{}`（后端 frame_step 的 `metrics or {}`）。
-            // 空对象是 truthy，会让 `v-if="...metrics"` 放行，进而渲染尚未产出的
-            // 字段（top_scores/keywords 等）→ undefined.length 抛错并打崩整棵 vdom。
-            // 故 pending 一律置 undefined —— 这正是模板的契约（`metrics?:` 可选，
-            // 且 `status === 'pending' && !metrics` 分支就是为它写的）。
-            metrics: msg.s === 'done' ? msg.metrics : undefined,
+            // metrics 的取舍（三种情况，别混）：
+            //   1. `done`：完整 metrics（top_scores/keywords 等全字段）
+            //   2. `pending` + `live: true`：**实时进度**，只带已得的计数字段
+            //      （后端 retrieval 在 embed/milvus/每批 es 各发一帧，fusion 在
+            //       rrf 后与 rerank 后各发一帧）。这是「已召回 N 篇」的数据源。
+            //   3. `pending` 且非 live：后端 `frame_step` 给的是 `{}`。空对象 truthy，
+            //      会让 `v-if="...metrics"` 放行并渲染尚未产出的字段
+            //      （top_scores/keywords）→ undefined.length 打崩 vdom。
+            //      故置 undefined，符合模板 `metrics?:` 的可选契约。
+            metrics:
+              msg.s === 'done'
+                ? msg.metrics
+                : (msg.metrics as { live?: boolean } | undefined)?.live
+                  ? msg.metrics
+                  : undefined,
           },
         }
         break

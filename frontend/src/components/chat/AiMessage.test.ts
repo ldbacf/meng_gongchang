@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import AiMessage from './AiMessage.vue'
@@ -6,96 +6,122 @@ import type { Message, RagSteps } from '@/types'
 import type { StepStatus } from '@/types/step'
 
 /**
- * 待答提示必须跟随真实步骤。
+ * 待答提示：步骤准确 + 按类型分配表达方式。
  *
- * 回归背景：`AiMessage` 的标题文案原先是从 5 句里**随机**挑一句、每 2.2 秒轮换
- * （「正在理解问题…」「检索文献中…」「分析医学资料…」…），跟后端执行到哪一步
- * 毫无关系。截图里出现过「检索文献中…」但实际还停在意图识别的情况。
- * 现在改为读 `ragSteps` 里那个 `pending` 的步骤。
+ * 历史：这里曾是 5 句文案每 2.2s **随机**轮换，与后端执行到哪一步无关
+ * （截图里出现过「检索文献中…」但实际停在意图识别）。
+ *
+ * 现在的规则：
+ *   - 步骤取 `ragSteps` 里 pending 的那一步
+ *   - 意图识别 / 生成回答 → 时间尺度（按耗时递进）
+ *   - 混合检索 / 融合重排 → 真实计数优先，无数字则退化为时间尺度
+ *   - 文字一律逐字出现
  */
-function step(status: StepStatus): {
-  status: StepStatus
-  title: string
-} {
+function step(status: StepStatus): { status: StepStatus; title: string } {
   return { status, title: 't' }
 }
 
 function makeMessage(ragSteps?: RagSteps): Message {
-  return {
-    id: 'm1',
-    role: 'ai',
-    content: '',
-    timestamp: Date.now(),
-    ragSteps,
-  }
+  return { id: 'm1', role: 'ai', content: '', timestamp: Date.now(), ragSteps }
 }
 
-function titleText(steps: RagSteps): string {
-  const wrapper = mount(AiMessage, {
-    props: { message: makeMessage(steps), isStreaming: true, streamContent: '' },
+function mountMsg(steps: RagSteps, streaming = true) {
+  return mount(AiMessage, {
+    props: { message: makeMessage(steps), isStreaming: streaming, streamContent: '' },
     global: { stubs: { RagPipelineSimple: true } },
   })
-  // 待答标题在步骤面板的按钮里，带 accent-text 样式
-  return wrapper.find('.text-accent-text').text()
+}
+
+/** 取待答提示的纯文本（逐字被拆成多个 span） */
+function hintText(wrapper: ReturnType<typeof mountMsg>): string {
+  const el = wrapper.find('.hint-text')
+  return el.exists() ? el.text() : ''
 }
 
 describe('AiMessage 待答提示', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
-  it('意图识别中 → 显示「正在理解问题…」', () => {
-    expect(titleText({ intent: step('pending') })).toBe('正在理解问题…')
+  it('意图识别中 → 时间尺度首句', async () => {
+    const w = mountMsg({ intent: step('pending') })
+    await w.vm.$nextTick()
+    expect(hintText(w)).toBe('正在理解问题…')
   })
 
-  it('混合检索中 → 显示「检索文献中…」', () => {
-    expect(
-      titleText({ intent: step('done'), retrieval: step('pending') }),
-    ).toBe('检索文献中…')
+  it('混合检索中（无计数）→ 过程描述而不是「0 篇」', async () => {
+    const w = mountMsg({ intent: step('done'), retrieval: step('pending') })
+    await w.vm.$nextTick()
+    const t = hintText(w)
+    expect(t).toBe('正在并行检索向量库与关键词索引…')
+    expect(t).not.toMatch(/0\s*篇/)
   })
 
-  it('融合重排中 → 显示「融合排序中…」（不再随机跳到别的句子）', () => {
-    expect(
-      titleText({
-        intent: step('done'),
-        retrieval: step('done'),
-        fusion: step('pending'),
-      }),
-    ).toBe('融合排序中…')
+  it('混合检索中（有计数）→ 显示数字徽标', async () => {
+    const w = mountMsg({
+      intent: step('done'),
+      retrieval: {
+        status: 'pending',
+        title: 't',
+        metrics: { live: true, stage: 'es', fetched: 12 },
+      } as never,
+    })
+    // 推进到 700ms 以上，进入「已召回 {n} 篇」那句
+    vi.advanceTimersByTime(900)
+    await w.vm.$nextTick()
+
+    expect(hintText(w)).toContain('12')
+    // 数字用独立徽标，不是普通文字
+    expect(w.find('.hint-count').exists()).toBe(true)
   })
 
-  it('生成回答中 → 显示「生成医学回答中…」', () => {
-    expect(
-      titleText({
+  it('融合重排中（有计数）→ 显示精选数', async () => {
+    const w = mountMsg({
+      intent: step('done'),
+      retrieval: step('done'),
+      fusion: {
+        status: 'pending',
+        title: 't',
+        metrics: { live: true, input_count: 12, output_count: 5 },
+      } as never,
+    })
+    vi.advanceTimersByTime(900)
+    await w.vm.$nextTick()
+    expect(hintText(w)).toContain('5')
+  })
+
+  it('同一份步骤反复渲染，文案稳定（不存在随机轮换）', async () => {
+    const steps: RagSteps = { intent: step('done'), retrieval: step('pending') }
+    const seen = new Set<string>()
+    for (let i = 0; i < 8; i++) {
+      seen.add(hintText(mountMsg(steps)))
+    }
+    expect([...seen]).toEqual(['正在并行检索向量库与关键词索引…'])
+  })
+
+  it('四步都完成后不再显示待答提示，改为「N 步」标题', async () => {
+    const w = mountMsg(
+      {
         intent: step('done'),
         retrieval: step('done'),
         fusion: step('done'),
-        answer: step('pending'),
-      }),
-    ).toBe('生成医学回答中…')
-  })
-
-  it('同一份步骤反复渲染，文案稳定（不存在随机轮换）', () => {
-    const steps: RagSteps = { intent: step('done'), retrieval: step('pending') }
-    const seen = new Set<string>()
-    for (let i = 0; i < 8; i++) seen.add(titleText(steps))
-    expect([...seen]).toEqual(['检索文献中…'])
-  })
-
-  it('四步都完成后不再显示待答文案，改为「N 步」标题', () => {
-    const wrapper = mount(AiMessage, {
-      props: {
-        message: makeMessage({
-          intent: step('done'),
-          retrieval: step('done'),
-          fusion: step('done'),
-          answer: step('done'),
-        }),
-        isStreaming: false,
+        answer: step('done'),
       },
-      global: { stubs: { RagPipelineSimple: true } },
-    })
-    expect(wrapper.find('.text-accent-text').exists()).toBe(false)
-    expect(wrapper.text()).toContain('检索与推理过程')
+      false,
+    )
+    await w.vm.$nextTick()
+    expect(w.find('.hint-text').exists()).toBe(false)
+    expect(w.text()).toContain('检索与推理过程')
+  })
+
+  it('逐字渲染：文案被拆成多个 char-in span', async () => {
+    const w = mountMsg({ intent: step('pending') })
+    await w.vm.$nextTick()
+    const chars = w.findAll('.char-in')
+    expect(chars.length).toBeGreaterThan(5)
   })
 })

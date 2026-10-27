@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
 from app.domain.retrieval.search_hit import SearchHit
@@ -22,8 +23,13 @@ class RetrievalPort(Protocol):
         es_top_k: int = 200,
         es_index: str | None = None,
         milvus_collection: str | None = None,
+        on_progress: Callable[[dict], None] | None = None,
     ) -> tuple[list[SearchHit], list[SearchHit]]:
-        """返回 `(milvus_hits, es_hits)`，**不做融合**（融合是 domain 的 rrf_fusion）。"""
+        """返回 `(milvus_hits, es_hits)`，**不做融合**（融合是 domain 的 rrf_fusion）。
+
+        `on_progress` 是可选的真实进度回调（阶段名 + 已召回数），
+        供 SSE 向用户展示「已召回 N 篇」这类实时计数。不传则退回一次性检索。
+        """
         ...
 
     def rerank(
