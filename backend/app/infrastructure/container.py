@@ -388,6 +388,24 @@ class AppContainer:
                 warm()
                 print("[API] bge-m3 模型加载完成")
 
+        # 预热 ES：**首次查询在进程启动后要 21 秒**（实测），之后 2-15ms。
+        # 那是 ES 客户端建立连接 + 索引段加载的一次性成本，不属于代码问题。
+        # 若不预热，这个成本会落在「第一个点引用的用户」身上 —— 他点一下要等
+        # 20 秒才出高亮，看起来就是功能坏了。这里在启动阶段吃掉它。
+        #
+        # 用一条最小的 term 查询（不聚合、size=0），只为触发连接与索引加载。
+        try:
+            es = self.get_es()
+            es.client.search(
+                index=self.get_settings().es_index,
+                body={"size": 0, "query": {"match_all": {}}},
+                request_timeout=30,
+            )
+            print("[API] ES 预热完成")
+        except Exception as e:
+            # 预热失败不影响启动：ES 不可用时检索本来就会降级（A-4.5）
+            print(f"[API] 警告: ES 预热失败（检索可能变慢）: {e}")
+
         # checkpoint saver（AsyncPostgresSaver，表已由 Alembic 0002 建好）
         # 创建失败降级（如 Windows ProactorEventLoop 下 psycopg 不可用）——
         # get_ingest_graph 使用时会抛明确错误；API 本体仍可启动。
