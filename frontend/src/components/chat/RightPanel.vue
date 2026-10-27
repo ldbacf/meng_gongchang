@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import type { Citation } from '@/types'
+import type { CitationBox, EvidenceResponse } from '@/api/citation'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import PdfViewer from './PdfViewer.vue'
+import EvidenceCard from './EvidenceCard.vue'
 import { X, ArrowLeft, FileText, Loader2 } from 'lucide-vue-next'
 
-defineProps<{
+const props = defineProps<{
   citations: Citation[]
   activeCitation: Citation | null
   pdfUrl: string | null
@@ -12,13 +14,35 @@ defineProps<{
   showBackButton: boolean
   /** pdf.js Range 请求所需的附加头（Authorization） */
   pdfHeaders?: Record<string, string>
+  /** 引用在原文中的精确位置（后端 bbox 定位结果） */
+  highlightBoxes?: CitationBox[] | null
+  /** 定位失败时的说明；空字符串表示无异常 */
+  locateMessage?: string
+  /** 证据卡数据（摘要分段 / 样本量 / 连续上下文） */
+  evidence?: EvidenceResponse | null
+  evidenceLoading?: boolean
+  /** 详情区视图：证据卡在前，PDF 是「查看原文」之后的第二层 */
+  view?: 'evidence' | 'pdf'
 }>()
 
 const emit = defineEmits<{
   close: []
   'back-to-list': []
   'select-citation': [citation: Citation]
+  'open-pdf': []
+  'show-evidence': []
 }>()
+
+/**
+ * 证据卡 ↔ PDF 切换。
+ *
+ * 写成具名函数而不是内联三元：`emit('a'|'b')` 的联合类型参数
+ * 在 vue-tsc 下会报「No overload matches」，且内联可读性也差。
+ */
+function toggleView() {
+  if (props.view === 'pdf') emit('show-evidence')
+  else emit('open-pdf')
+}
 
 // ── 面板宽度：可拖拽 + 记忆 ────────────────────────────────
 
@@ -150,6 +174,17 @@ const panelStyle = computed(() => ({
       <div class="min-w-0 flex-1 truncate text-[13.5px] font-semibold">
         {{ activeCitation ? activeCitation.title : '参考文献' }}
       </div>
+      <!-- 证据卡 ↔ PDF 切换：只在有 PDF 且正在看详情时出现 -->
+      <button
+        v-if="activeCitation && pdfUrl"
+        class="flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-[11px] text-muted transition-colors hover:bg-surface hover:text-ink"
+        :title="view === 'pdf' ? '返回证据卡' : '查看原文 PDF'"
+        @click="toggleView"
+      >
+        <FileText v-if="view !== 'pdf'" :size="11" />
+        <ArrowLeft v-else :size="11" />
+        {{ view === 'pdf' ? '证据卡' : '原文' }}
+      </button>
       <button
         class="grid h-8 w-8 place-items-center rounded-full text-muted transition-colors hover:bg-surface hover:text-ink"
         title="关闭"
@@ -185,29 +220,52 @@ const panelStyle = computed(() => ({
         </button>
       </div>
 
-      <!-- 详情（PDF） -->
+      <!-- 详情 -->
       <div v-else class="flex h-full flex-col">
-        <div class="flex-1 overflow-hidden bg-surface">
-          <div v-if="pdfLoading" class="flex h-full items-center justify-center gap-2">
-            <Loader2 :size="18" class="animate-spin text-accent" />
-            <span class="text-[12.5px] text-muted">加载 PDF…</span>
-          </div>
-          <PdfViewer
-            v-else-if="pdfUrl"
-            :url="pdfUrl"
-            :title="activeCitation?.title"
-            :headers="pdfHeaders"
-            :highlight-text="activeCitation?.snippet ?? null"
-            :initial-page="activeCitation?.page ?? null"
+        <!-- 证据卡（默认视图）：摘要分段 + 连续上下文，毫秒级、不等 PDF -->
+        <div v-if="view !== 'pdf'" class="min-h-0 flex-1 overflow-hidden">
+          <EvidenceCard
+            :evidence="evidence ?? null"
+            :loading="evidenceLoading ?? false"
+            :pdf-available="!!pdfUrl"
+            @open-pdf="emit('open-pdf')"
+            @copy="() => {}"
           />
-          <div v-else class="flex h-full items-center justify-center text-[12.5px] text-faint">
-            该文献暂无可预览的原文
-          </div>
         </div>
-        <div class="border-t border-line px-4 py-3">
-          <p class="text-[11.5px] leading-relaxed text-muted">
-            {{ activeCitation.snippet }}
-          </p>
+
+        <!-- PDF（第二层：用户明确要看原文时才加载，2.76MB @240KB/s ≈ 12s） -->
+        <div v-else class="flex h-full flex-col">
+          <div class="flex-1 overflow-hidden bg-surface">
+            <div v-if="pdfLoading" class="flex h-full items-center justify-center gap-2">
+              <Loader2 :size="18" class="animate-spin text-accent" />
+              <span class="text-[12.5px] text-muted">加载 PDF…</span>
+            </div>
+            <PdfViewer
+              v-else-if="pdfUrl"
+              :url="pdfUrl"
+              :title="activeCitation?.title"
+              :headers="pdfHeaders"
+              :highlight-boxes="highlightBoxes"
+              :initial-page="activeCitation?.page ?? null"
+            />
+            <div v-else class="flex h-full items-center justify-center text-[12.5px] text-faint">
+              该文献暂无可预览的原文
+            </div>
+          </div>
+          <div class="border-t border-line px-4 py-3">
+            <!-- 定位失败时说明原因，但 PDF 仍可正常阅读 -->
+            <p
+              v-if="locateMessage"
+              class="mb-1.5 flex items-center gap-1.5 text-[10.5px] text-warn"
+              title="后端未能在 MinerU 解析结果中匹配到该片段"
+            >
+              <span class="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
+              {{ locateMessage }}
+            </p>
+            <p class="text-[11.5px] leading-relaxed text-muted">
+              {{ activeCitation.snippet }}
+            </p>
+          </div>
         </div>
       </div>
     </div>

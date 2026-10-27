@@ -2,15 +2,15 @@
 import { ref, watch, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-// 官方 viewer 组件：自带文本层（可选中/复制）、高亮、页码、缩放
+// 官方 viewer 组件：自带文本层（可选中/复制）、页码、缩放
 import {
   EventBus,
   PDFViewer,
   PDFLinkService,
-  PDFFindController,
 } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import 'pdfjs-dist/web/pdf_viewer.css'
 import { Minus, Plus, ChevronLeft, ChevronRight, Maximize2, AlertCircle } from 'lucide-vue-next'
+import type { CitationBox } from '@/api/citation'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -19,9 +19,14 @@ const props = defineProps<{
   title?: string
   /** 附加请求头（如 Authorization）——pdf.js 的 Range 请求也要带上鉴权 */
   headers?: Record<string, string>
-  /** 需要在正文中高亮的片段（引用原文） */
-  highlightText?: string | null
-  /** 打开时定位到的页码（1-based） */
+  /**
+   * 引用在原文中的精确位置（来自后端 `/locate`，数据源是 MinerU 的 bbox）。
+   *
+   * **不再用 findController 搜索全文**：那要求先加载完整份 PDF（12s @ 240KB/s），
+   * 且 MinerU 文本与 PDF 文本层标点不一致时必然 0 命中。现在直接按坐标画框。
+   */
+  highlightBoxes?: CitationBox[] | null
+  /** 打开时定位到的页码（1-based）。优先用 highlightBoxes[0].page */
   initialPage?: number | null
 }>()
 
@@ -30,16 +35,14 @@ const error = ref('')
 const pageNum = ref(1)
 const pageTotal = ref(0)
 const scalePercent = ref(100)
-const matchCount = ref(0)
-const matchIndex = ref(0)
-const highlightMissed = ref(false)
+/** 已画上的高亮框数量（用于工具栏提示） */
+const boxCount = ref(0)
 
 const containerRef = ref<HTMLElement | null>(null)
 const viewerElRef = ref<HTMLElement | null>(null)
 
 let eventBus: any = null
 let linkService: any = null
-let findController: any = null
 let viewer: any = null
 let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null
 /** pagesinit 之前设 currentPageNumber 会报 "is not a valid page"，先存起来 */
@@ -51,7 +54,6 @@ function ensureViewer() {
   if (viewer || !containerRef.value || !viewerElRef.value) return
   eventBus = new EventBus()
   linkService = new PDFLinkService({ eventBus })
-  findController = new PDFFindController({ eventBus, linkService })
 
   viewer = new PDFViewer({
     // pdf.js 的类型要求 HTMLDivElement；ref 声明为 HTMLElement，这里收窄
@@ -59,7 +61,6 @@ function ensureViewer() {
     viewer: viewerElRef.value as HTMLDivElement,
     eventBus,
     linkService,
-    findController,
     // 只读预览：不启用编辑/注释层
     annotationMode: 0,
   })
@@ -76,71 +77,89 @@ function ensureViewer() {
       viewer.currentPageNumber = Math.min(pendingPage, viewer.pagesCount)
     }
     pendingPage = null
-    // 文本层是懒加载的，稍等一拍再搜，否则 find 可能扫不到内容
-    setTimeout(() => runHighlight(), 350)
+    // 页面已建好即可画框；不依赖文本层（bbox 是几何信息）
+    nextTick(() => renderBoxes())
   })
   eventBus.on('scalechanging', (e: any) => {
     scalePercent.value = Math.round(e.scale * 100)
+    // 缩放后页面尺寸变了，框要按新尺寸重画
+    nextTick(() => renderBoxes())
   })
-  eventBus.on('updatefindmatchescount', (e: any) => {
-    matchCount.value = e.matchesCount?.total ?? 0
-  })
-  eventBus.on('updatefindcontrolstate', (e: any) => {
-    // state 1 = FOUND
-    if (e.state === 1) matchIndex.value = (e.matchesCount?.current ?? 0) + 1
+  // 滚动到新页时，该页的 DOM 可能刚建出来，补画一次
+  eventBus.on('pagerendered', () => {
+    renderBoxes()
   })
 }
 
-// ── 从引用片段推导一个可命中文本层的查询串 ──
+// ── 按 bbox 画高亮框 ──
 //
-// 文本层与 MinerU 抽取的文本在标点、空格上并不一致，直接拿整段 snippet 搜
-// 几乎必然 0 命中。策略：只在**标点**处切段（不能按空格切，否则英文会被拆成
-// 单个单词），取最长的无标点片段作为查询。
-function buildQuery(snippet: string): string {
-  const segs = snippet
-    .split(/[，。、；：！？""''（）()《》〈〉【】\[\]…—\-–·,.;:!?"'`]+/)
-    .map((s) => s.replace(/\s+/g, ' ').trim())
-    .filter((s) => s.replace(/\s/g, '').length >= 8)
+// bbox 是 MinerU 输出的 0-1000 归一化坐标（相对页面宽高）。这里把它换算成
+// 实际像素，覆盖在该页的 `.page` 元素上。
+//
+// **为什么用绝对定位覆盖层而不是改文本层**：
+//   - 文本层是 pdf.js 生成的，结构与 MinerU 的分块不一致，没法对应
+//   - 覆盖层与文本层互不干扰：复制/选中仍然正常
+//   - 缩放时只需重算像素，不用重建 DOM
+function renderBoxes() {
+  const root: HTMLElement | null = viewerElRef.value
+  if (!root) return
 
-  if (segs.length) {
-    const best = segs.reduce((a, b) => (b.length > a.length ? b : a))
-    return best.slice(0, 60)
+  // 清掉旧框
+  root.querySelectorAll('.cite-box-layer').forEach((n) => n.remove())
+  boxCount.value = 0
+
+  const boxes = props.highlightBoxes
+  if (!boxes?.length || !viewer) return
+
+  // 按页分组
+  const byPage = new Map<number, CitationBox[]>()
+  for (const b of boxes) {
+    if (!byPage.has(b.page)) byPage.set(b.page, [])
+    byPage.get(b.page)!.push(b)
   }
-  // 兜底：整段去掉标点后取前 20 字
-  const cleaned = snippet.replace(/[^\u4e00-\u9fa5A-Za-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
-  return cleaned.slice(0, 20)
-}
 
-function runHighlight() {
-  const text = props.highlightText?.trim()
-  if (!text || !eventBus) {
-    highlightMissed.value = false
-    return
+  for (const [page, list] of byPage) {
+    const pageEl = root.querySelector(`.page[data-page-number="${page}"]`) as HTMLElement | null
+    if (!pageEl) continue  // 该页还没渲染（虚拟滚动），等 pagerendered 再来
+
+    // 页面元素尺寸 = PDF 页在 100% 缩放下的尺寸 × 当前缩放；
+    // 用 offsetWidth/Height 直接读实际布局尺寸最稳妥
+    const w = pageEl.offsetWidth
+    const h = pageEl.offsetHeight
+    if (!w || !h) continue
+
+    const layer = document.createElement('div')
+    layer.className = 'cite-box-layer'
+    // 覆盖层要盖在 canvas 之上、文本层之下（文本层仍需可选中）
+    layer.style.cssText = [
+      'position:absolute',
+      'inset:0',
+      'pointer-events:none',
+      'z-index:2',
+    ].join(';')
+
+    for (const b of list) {
+      const [x0, y0, x1, y1] = b.bbox
+      const el = document.createElement('div')
+      el.className = 'cite-box'
+      el.style.cssText = [
+        'position:absolute',
+        `left:${(x0 / 1000) * w}px`,
+        `top:${(y0 / 1000) * h}px`,
+        `width:${((x1 - x0) / 1000) * w}px`,
+        `height:${((y1 - y0) / 1000) * h}px`,
+        'border-radius:2px',
+        'background:var(--cite-hl-bg)',
+        'box-shadow:0 0 0 2px var(--cite-hl-bg)',
+        'animation:cite-in .45s cubic-bezier(.215,.61,.355,1) both',
+      ].join(';')
+      layer.appendChild(el)
+    }
+
+    pageEl.appendChild(layer)
+    pageEl.style.position = 'relative'
+    boxCount.value += list.length
   }
-  const query = buildQuery(text)
-  if (!query) {
-    highlightMissed.value = true
-    return
-  }
-  highlightMissed.value = false
-  matchCount.value = 0
-  matchIndex.value = 0
-
-  eventBus.dispatch('find', {
-    source: null,
-    type: '',
-    query,
-    caseSensitive: false,
-    entireWord: false,
-    highlightAll: true,
-    findPrevious: false,
-    matchDiacritics: false,
-  })
-
-  // find 是异步的：等文本层高亮落地后再判断是否命中
-  setTimeout(() => {
-    highlightMissed.value = matchCount.value === 0
-  }, 900)
 }
 
 // ── 加载 ──
@@ -150,8 +169,7 @@ async function loadPdf() {
   error.value = ''
   pageNum.value = 1
   pageTotal.value = 0
-  matchCount.value = 0
-  highlightMissed.value = false
+  boxCount.value = 0
 
   await nextTick()
   ensureViewer()
@@ -173,7 +191,8 @@ async function loadPdf() {
     })
 
     pdfDoc = await task.promise
-    pendingPage = props.initialPage ?? null
+    // 定位页：highlightBoxes 的首页优先于外部传入的 initialPage
+    pendingPage = props.highlightBoxes?.[0]?.page ?? props.initialPage ?? null
     viewer.setDocument(pdfDoc)
     linkService.setDocument(pdfDoc, null)
     loading.value = false
@@ -194,19 +213,28 @@ function zoomOut() { if (viewer) viewer.currentScale = Math.max(0.25, viewer.cur
 function zoomIn() { if (viewer) viewer.currentScale = Math.min(4, viewer.currentScale * 1.15) }
 function fitWidth() { if (viewer) viewer.currentScaleValue = 'page-width' }
 
-function nextMatch() {
-  if (!eventBus) return
-  eventBus.dispatch('find', {
-    source: null, type: 'again', query: '', caseSensitive: false,
-    entireWord: false, highlightAll: true, findPrevious: false,
-  })
+/** 跳到第一处命中（多命中时在工具栏提供切换） */
+function gotoFirstBox() {
+  const b = props.highlightBoxes?.[0]
+  if (b && viewer) viewer.currentPageNumber = Math.min(b.page, viewer.pagesCount)
 }
 
 // ── 生命周期 ──
 
 onMounted(() => { loadPdf() })
 watch(() => props.url, () => { loadPdf() })
-watch(() => props.highlightText, () => { if (pdfDoc) runHighlight() })
+watch(
+  () => props.highlightBoxes,
+  () => {
+    if (!pdfDoc) return
+    const first = props.highlightBoxes?.[0]
+    if (first && viewer && first.page !== pageNum.value) {
+      viewer.currentPageNumber = Math.min(first.page, viewer.pagesCount)
+    }
+    nextTick(() => renderBoxes())
+  },
+  { deep: true },
+)
 
 onBeforeUnmount(() => {
   if (pdfDoc) { pdfDoc.destroy(); pdfDoc = null }
@@ -252,20 +280,15 @@ onBeforeUnmount(() => {
         <Maximize2 :size="13" />
       </button>
 
-      <!-- 命中提示 -->
+      <!-- 命中提示：点击跳到第一处 -->
       <button
-        v-if="highlightText && matchCount > 0"
+        v-if="boxCount > 0"
         class="ml-auto flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[10.5px] font-medium text-accent-text"
-        title="跳到下一处匹配"
-        @click="nextMatch"
+        title="跳到命中位置"
+        @click="gotoFirstBox"
       >
-        命中 {{ matchIndex || 1 }}/{{ matchCount }}
+        已定位 {{ boxCount }} 处
       </button>
-      <span
-        v-else-if="highlightMissed"
-        class="ml-auto text-[10.5px] text-warn"
-        title="文本层未匹配到该片段：MinerU 抽取文本与 PDF 排版可能不一致"
-      >未定位到原文</span>
     </div>
 
     <!-- 画布 -->
@@ -306,15 +329,23 @@ onBeforeUnmount(() => {
   box-shadow: var(--sh-1);
 }
 
-/* 高亮：两个 CSS 变量是声明在 `.textLayer .highlight` **自己身上**的（不是继承），
-   所以必须在同一元素上覆盖；默认值是品红 + 选中绿，与整体配色不搭。 */
-.pdf-scroll :deep(.textLayer .highlight) {
-  --highlight-bg-color: rgba(26, 115, 232, 0.25);
-  --highlight-selected-bg-color: rgba(26, 115, 232, 0.45);
-  border-radius: 2px;
-}
-
 .pdf-scroll :deep(.textLayer) {
   user-select: text;
+}
+
+/* ── bbox 高亮框 ──
+   颜色走 CSS 变量，明暗主题各自定义（在 tokens.css 里）。
+   用半透明背景 + 同等 box-shadow 让边框与填充一致，视觉上是一块干净的色带。 */
+.pdf-scroll :deep(.cite-box-layer) {
+  --cite-hl-bg: rgba(26, 115, 232, 0.28);
+}
+
+:global(html.dark) .pdf-scroll :deep(.cite-box-layer) {
+  --cite-hl-bg: rgba(138, 180, 248, 0.3);
+}
+
+@keyframes cite-in {
+  from { opacity: 0; transform: scaleY(0.6); }
+  to { opacity: 1; transform: none; }
 }
 </style>

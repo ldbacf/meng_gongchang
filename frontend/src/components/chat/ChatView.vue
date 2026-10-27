@@ -64,12 +64,19 @@ const {
   activeCitation,
   pdfUrl,
   pdfLoading,
+  highlightBoxes,
+  locateMessage,
   showBackButton,
   uniqueCitations,
   pdfHeaders,
+  evidence,
+  evidenceLoading,
+  view: rightPanelView,
   openCitation,
   openList,
   backToList,
+  showPdf,
+  showEvidence,
   close: closeRightPanel,
 } = useCitationPanel(computed(() => chatStore.messages))
 
@@ -345,9 +352,16 @@ async function handleRegenerate(message: { id: string }) {
         :pdf-loading="pdfLoading"
         :show-back-button="showBackButton"
         :pdf-headers="pdfHeaders"
+        :highlight-boxes="highlightBoxes"
+        :locate-message="locateMessage"
+        :evidence="evidence"
+        :evidence-loading="evidenceLoading"
+        :view="rightPanelView"
         @close="closeRightPanel"
         @back-to-list="backToList"
         @select-citation="handlePanelSelectCitation"
+        @open-pdf="showPdf"
+        @show-evidence="showEvidence"
       />
     </Transition>
   </div>
