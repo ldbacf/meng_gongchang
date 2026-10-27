@@ -117,32 +117,35 @@ describe('stepHint — 计数与退化的分配规则', () => {
 
   it('生成回答：只用时间尺度，永远不带计数', () => {
     expect(stepHint('answer', 0, { live: true }).count).toBeNull()
-    expect(stepHint('answer', 4000, { live: true }).text).toBe('正在收尾，确保每句都有出处…')
+    // 档位是 1s/5s/15s/30s：15s 时应进入「回答较长…」那档
+    expect(stepHint('answer', 16000, { live: true }).text).toBe(
+      '回答较长，正在收尾并复核引用编号…',
+    )
   })
 
   it('混合检索：拿到数字就显示计数', () => {
-    const h = stepHint('retrieval', 900, { live: true, fetched: 12 })
+    const h = stepHint('retrieval', 1500, { live: true, fetched: 12 })
     expect(h.count).toBe(12)
     expect(h.text).toContain('{n}')
   })
 
-  it('混合检索：没有数字时退化为过程描述（不显示「0 篇」）', () => {
-    const noLive = stepHint('retrieval', 900, undefined)
+  it('混合检索：没有数字时退化为过程描述（不显示「0 条」）', () => {
+    const noLive = stepHint('retrieval', 1500, undefined)
     expect(noLive.count).toBeNull()
     expect(noLive.text).toBe('两路结果正在汇合…')
     expect(noLive.text).not.toContain('0')
 
     // 计数为 0 时同样退化
-    const zero = stepHint('retrieval', 900, { live: true, fetched: 0 })
+    const zero = stepHint('retrieval', 1500, { live: true, fetched: 0 })
     expect(zero.count).toBeNull()
     expect(zero.text).toBe('两路结果正在汇合…')
   })
 
   it('融合重排：优先用精选数，没有则用候选数', () => {
-    const onlyInput = stepHint('fusion', 900, { live: true, input_count: 12 })
+    const onlyInput = stepHint('fusion', 1500, { live: true, input_count: 12 })
     expect(onlyInput.count).toBe(12)
 
-    const withOutput = stepHint('fusion', 900, {
+    const withOutput = stepHint('fusion', 1500, {
       live: true,
       input_count: 12,
       output_count: 5,
@@ -151,14 +154,31 @@ describe('stepHint — 计数与退化的分配规则', () => {
   })
 
   it('融合重排：没有数字时退化', () => {
-    const h = stepHint('fusion', 900, { live: true })
+    const h = stepHint('fusion', 1500, { live: true })
     expect(h.count).toBeNull()
     expect(h.text).toBe('重排模型逐条打分中…')
   })
 
   it('同一步内随耗时换句（时间尺度）', () => {
     expect(stepHint('retrieval', 0, undefined).text).toBe('正在并行检索向量库与关键词索引…')
-    expect(stepHint('retrieval', 3000, undefined).text).toBe('正在按语义相似度去重…')
+    // 5s 档
+    expect(stepHint('retrieval', 6000, undefined).text).toBe('正在按语义相似度去重…')
+  })
+
+  it('长任务不会卡在同一句：四档文案互不相同', () => {
+    // 这是本轮修的核心问题：原来档位只到 2.6s，30s 的任务会一直停在最后一句
+    const at = [0, 2000, 8000, 20000, 35000]
+    const seen = at.map((ms) => stepHint('retrieval', ms, undefined).text)
+    // 相邻档位必须变化（直到最后一档 saturation）
+    expect(new Set(seen).size).toBeGreaterThanOrEqual(4)
+    // 最末两档允许相同（30s 后不再换句），但 20s 与 8s 必须不同
+    expect(seen[2]).not.toBe(seen[3])
+  })
+
+  it('30s 之后文案稳定（不再换句，避免噪音）', () => {
+    const a = stepHint('retrieval', 30000, undefined).text
+    const b = stepHint('retrieval', 90000, undefined).text
+    expect(a).toBe(b)
   })
 
   it('数字变化会改变 signature（触发重绘），文案不变则不会', () => {

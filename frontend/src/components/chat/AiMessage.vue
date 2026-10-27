@@ -273,10 +273,17 @@ const stepsOpen = ref(true)
           </span>
           <span v-else>{{ stepsTitle }}</span>
 
+          <!-- 当前步骤已耗时：长任务时让用户确认"时间在走"而不是卡死。
+               超过 3s 才显示 —— 短任务闪一下只是噪音。 -->
+          <span
+            v-if="isProcessing && stepElapsedMs >= 3000"
+            class="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-faint"
+          >{{ (stepElapsedMs / 1000).toFixed(0) }}s</span>
+
           <ChevronDown
             :size="13"
-            class="ml-auto transition-transform"
-            :class="{ 'rotate-180': stepsOpen }"
+            class="shrink-0 transition-transform"
+            :class="[stepsOpen ? 'rotate-180' : '', stepElapsedMs >= 3000 ? '' : 'ml-auto']"
           />
         </button>
         <div
