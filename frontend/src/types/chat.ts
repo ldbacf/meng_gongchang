@@ -51,7 +51,35 @@ export interface AnswerMetrics {
   total_elapsed_ms: number
 }
 
-export type RagStepMetrics = IntentMetrics | RetrievalMetrics | FusionMetrics | AnswerMetrics
+/**
+ * 实时进度帧（`live: true`）。
+ *
+ * 与上面三种「完成态 metrics」不是一回事：完成态字段齐全，而进度帧只带
+ * **当前已得**的计数（retrieval 会在 embed / milvus / 每批 es 各发一帧）。
+ * 前端据此显示「已召回 12 篇」——数字真实，不是估算。
+ *
+ * 单独建模而不复用 `RetrievalMetrics`：后者字段必填，进度帧里 `routing`、
+ * `*_top_docs` 都还不存在，混用会让类型检查失去意义。
+ */
+export interface LiveProgressMetrics {
+  live: true
+  stage?: 'embed' | 'milvus' | 'es' | 'rerank' | 'done' | ''
+  milvus_hits?: number
+  es_hits?: number
+  /** 两路已取回的原始条数（未去重，必然大于真实命中数） */
+  fetched?: number
+  after_dedup?: number
+  es_total?: number
+  input_count?: number
+  output_count?: number
+}
+
+export type RagStepMetrics =
+  | IntentMetrics
+  | RetrievalMetrics
+  | FusionMetrics
+  | AnswerMetrics
+  | LiveProgressMetrics
 
 export interface RagStep {
   /** 与后端 `app/domain/lifecycle.py` 同一枚举；`done` 是规范成功态 */

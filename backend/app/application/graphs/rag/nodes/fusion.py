@@ -32,6 +32,19 @@ async def fusion(state: dict) -> dict:
 
     fused = rrf_fusion(m_hits, e_hits, k=20, top_k=100)
 
+    # ── 实时计数（真实值，不是估算） ──
+    #
+    # 两个点天然可得：rrf 去重后的候选数、rerank 之后的精选数。
+    # 中间那段 rerank 是**阻塞调用**（一次 HTTP 往返），没有可上报的中间量，
+    # 所以这里只能给出「比对 12 篇」→「精选 5 段」两次跳变，不伪造递增。
+    if fused:
+        await emit_step("fusion", "pending", metrics={
+            "live": True,
+            "stage": "rerank",
+            "input_count": len(fused),
+            "output_count": 0,
+        })
+
     degraded = False
     reranked = list(fused)
     try:
@@ -44,6 +57,15 @@ async def fusion(state: dict) -> dict:
         degraded = True
 
     top_scores = [round(h.score_rerank, 3) for h in reranked[:5] if h.score_rerank > 0]
+
+    # 精选数出来了再报一次（前端「精选 5 段」）
+    if reranked:
+        await emit_step("fusion", "pending", metrics={
+            "live": True,
+            "stage": "rerank",
+            "input_count": len(fused),
+            "output_count": len(reranked),
+        })
 
     elapsed_ms = round((time.perf_counter() - t0) * 1000)
     step = build_rag_step(

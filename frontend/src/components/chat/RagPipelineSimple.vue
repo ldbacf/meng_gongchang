@@ -136,11 +136,20 @@ function prettyKey(k: string): string {
     .join(' ')
 }
 
+/**
+ * 实时进度帧里的内部字段，不该出现在「指标明细」里。
+ *
+ * `live` 是标记位、`stage` 是内部阶段名、`es_total` 是进度分母 —— 它们服务于
+ * 待答提示那句「已召回 12 篇」，对用户没有信息量。不过滤的话明细区会出现
+ * 「live  true」「stage  es」这类噪声行。
+ */
+const INTERNAL_METRIC_KEYS = new Set(['live', 'stage', 'es_total'])
+
 function metricEntries(key: StepKey): { k: string; v: string }[] {
   const m = get(key)?.metrics as Record<string, unknown> | undefined
   if (!m) return []
   return Object.entries(m)
-    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .filter(([k, v]) => !INTERNAL_METRIC_KEYS.has(k) && v !== null && v !== undefined && v !== '')
     .map(([k, v]) => {
       let text: string
       if (Array.isArray(v)) text = v.length > 4 ? `${v.slice(0, 4).join(', ')} …（共 ${v.length}）` : v.join(', ')
