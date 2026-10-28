@@ -112,7 +112,17 @@ describe('stepHint — 计数与退化的分配规则', () => {
 
     const b = stepHint('intent', 2000, { live: true })
     expect(b.count).toBeNull()
-    expect(b.text).toBe('正在补全医学上下文…')
+    expect(b.text).toBe('正在补全检索上下文…')
+  })
+
+  it('意图识别文案不写死「医学」——通用知识库下那是错误信息', () => {
+    // 知识库可能是 AIGC / 影视 / 法律等通用库。曾写「正在补全医学上下文…」，
+    // 用户切到通用库后看到这句，会以为系统还在检索上一个医学库。
+    for (const ms of [0, 2000, 8000, 20000, 40000]) {
+      const b = stepHint('intent', ms, { live: true })
+      expect(b.text).not.toContain('医学')
+      expect(b.text).not.toContain('医疗')
+    }
   })
 
   it('生成回答：只用时间尺度，永远不带计数', () => {

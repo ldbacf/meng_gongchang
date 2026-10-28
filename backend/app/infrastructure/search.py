@@ -163,17 +163,22 @@ def _milvus_search(
     mv = get_container().get_milvus()
     mv.connect()
 
-    # 存量 4 字段通用集合无 level/chunk_type/doi/title_cn 字段，需精简 output_fields
-    default_collection = get_settings().milvus_collection
-    use_full_fields = not (milvus_collection and milvus_collection != default_collection)
-    output_fields = None if use_full_fields else ["chunk_id", "doc_id", "title"]
-
+    # 所有集合都已按共享 schema 建（10 字段，含 title_cn），不再需要
+    # 「存量 4 字段集合」的精简分支。
+    #
+    # 这里曾给非默认库传 `["chunk_id","doc_id","title"]`，而 schema 里根本没有
+    # `title` 字段（只有 `title_cn`）→ Milvus 直接抛
+    # `MilvusException: field title not exist`。异常被 retrieval 节点的
+    # `except Exception: degraded = True` 吞掉，表现为「向量召回 0 条、只有 ES
+    # 那一路」，rerank 分数偏低后回答落到「知识库中未找到相关文献」——
+    # 而文档其实就在库里、关键词也能命中。**静默降级比报错更难查**。
+    #
+    # 字段名统一由 `milvus.schema` 决定，这里不再自行拼字段列表。
     raw_hits = mv.search(
-        milvus_collection or default_collection,
+        milvus_collection or get_settings().milvus_collection,
         embedding,
         filters=filters,
         top_k=top_k,
-        output_fields=output_fields,
     )
 
     hits = []

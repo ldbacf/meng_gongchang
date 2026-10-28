@@ -158,6 +158,25 @@ const stepLabels: Record<string, string> = {
   milvus: 'Milvus 写入',
 }
 
+/**
+ * 步骤的产出数量（带单位）。
+ *
+ * 直接用 `×N` 是错的：`chunking.count` 是**篇数**（恒为 1），而
+ * `embedding` / `es_write` / `milvus` 的 count 是**块数**。同一个 `×1`
+ * 和 `×18` 并排出现，用户会以为切分只切出 1 块。
+ *
+ * 这里也不显示 `target_index` / `target_collection`（`kb_ai_smark` 这类
+ * ES 索引名与 Milvus 集合名）—— 那是部署细节，对用户没有意义，
+ * 而且两个库名往往相同，同一行会重复出现两遍。
+ */
+function stepCount(doc: DocumentInfo, key: string): string {
+  const n = doc.pipeline_steps?.[key]?.count
+  if (n == null) return ''
+  if (key === 'chunking') return `${n} 篇`
+  if (key === 'mineru') return `${n} 篇`
+  return `${n} 块`
+}
+
 const readyCount = computed(() => adminStore.documents.filter((d) => d.status === 'ready').length)
 </script>
 
@@ -297,9 +316,10 @@ const readyCount = computed(() => adminStore.documents.filter((d) => d.status ==
                     v-if="doc.pipeline_steps[key].status === 'failed' && doc.pipeline_steps[key].error"
                     class="truncate text-danger"
                   >{{ doc.pipeline_steps[key].error }}</span>
-                  <span v-if="doc.pipeline_steps[key].target_index" class="ml-auto text-faint">{{ doc.pipeline_steps[key].target_index }}</span>
-                  <span v-if="doc.pipeline_steps[key].target_collection" class="text-faint">{{ doc.pipeline_steps[key].target_collection }}</span>
-                  <span v-if="doc.pipeline_steps[key].count" class="ml-auto text-faint">×{{ doc.pipeline_steps[key].count }}</span>
+                  <!-- 只显示数量。ES 索引名 / Milvus 集合名是内部实现，不印给用户 -->
+                  <span v-if="doc.pipeline_steps[key].count" class="ml-auto text-faint">
+                    {{ stepCount(doc, key) }}
+                  </span>
                 </template>
               </div>
             </div>

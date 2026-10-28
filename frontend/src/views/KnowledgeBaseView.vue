@@ -155,15 +155,22 @@ function goToKB(kbId: string) {
               <span
                 v-if="adminStore.activeKbId === kb.id"
                 class="inline-flex items-center gap-1 rounded-full bg-ok-soft px-2 py-0.5 text-[10.5px] font-medium text-ok"
+                title="对话检索的是这个库"
               >
                 <Check :size="10" />
-                使用中
+                对话使用中
               </span>
+              <!-- 切换活跃库必须**始终可见**。
+                   原先这个按钮是 `opacity-0` + `group-hover:opacity-100`，结果：
+                   用户进详情页浏览新库时根本不会发现要点「启用」切换，回到对话
+                   仍在检索上一个库。表现为「换成了其他知识库，对话还是医学相关」。
+                   注意卡片本身点击是「进入详情」（goToKB），不是切换。 -->
               <button
                 v-else
-                class="rounded-full border border-line px-2.5 py-0.5 text-[10.5px] font-medium text-ink-2 opacity-0 transition-all hover:bg-surface group-hover:opacity-100"
+                class="rounded-full border border-line px-2.5 py-0.5 text-[10.5px] font-medium text-ink-2 transition-colors hover:bg-surface hover:border-line-strong"
+                title="让对话检索这个知识库"
                 @click.stop="activateKb(kb)"
-              >启用</button>
+              >设为对话库</button>
 
               <button
                 v-if="kb.slug !== 'zhong_guo_quan_ke'"

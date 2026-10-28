@@ -89,9 +89,13 @@ const T_VERY_SLOW = 30000
 const COPY: Record<RagStepKey, StepCopy> = {
   intent: {
     // 意图识别没有"数量"语义，只用时间尺度
+    //
+    // 措辞里**不要出现「医学」**：知识库可能是通用文档库（AIGC、影视、法律…），
+    // 那句「正在补全医学上下文…」在通用库下是明显的错误信息 —— 用户换库后
+    // 看到它，会以为系统还在检索上一个医学库。
     fallback: [
       { at: 0, text: '正在理解问题…' },
-      { at: T_QUICK, text: '正在补全医学上下文…' },
+      { at: T_QUICK, text: '正在补全检索上下文…' },
       { at: T_MID, text: '正在识别问题类型与关键信息…' },
       { at: T_SLOW, text: '正在判断这个问题该查库还是直接作答…' },
       { at: T_VERY_SLOW, text: '意图判定比平时慢，模型在生成改写后的检索式…' },
