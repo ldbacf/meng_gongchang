@@ -16,6 +16,19 @@ from langgraph.types import interrupt
 from app.application.graphs.state import IngestState
 from app.domain.ports.exceptions import FatalError
 
+# 轮询轮次硬上限（兜底）。
+#
+# 墙钟超时 `max_poll_time` 只在 submit 路径生效；resume 路径提前 return，
+# 一旦它的分支标志缺失（`resume_dispatch` 曾漏声明在 IngestState 里，
+# 被 LangGraph 静默丢弃），图会走 `pause_wait → poll_parsed` 无限自旋，
+# 而 `poll_started_ts` 在 resume 分支之前根本没被读取 —— 于是既超不了时、
+# 也退不出去，把唯一 worker 永久独占。
+#
+# 所以这里再加一道**与路径无关**的轮次上限：正常 submit 批在 20 分钟内
+# 最多 poll 240 次（poll_interval 5s），留一倍余量取 600。超过即判 fatal，
+# 让 finalize 把任务标失败并在界面上显示原因，而不是无声地卡住。
+_MAX_POLL_ROUNDS = 600
+
 
 async def poll_parsed(state: IngestState) -> dict:
     """单次轮询 MinerU batch 结果。
@@ -32,6 +45,18 @@ async def poll_parsed(state: IngestState) -> dict:
     batch_id = state["batch_id"]
     token = vault.resolve(state["token_id"]) or ""
     count = state.get("poll_count", 0) + 1
+
+    # 轮次硬上限：任何路径都不允许无限自旋（见 _MAX_POLL_ROUNDS 说明）
+    if count > _MAX_POLL_ROUNDS:
+        return {
+            "poll_count": count,
+            "fatal": True,
+            "error": {
+                "step": "poll",
+                "type": "Fatal",
+                "message": f"轮询次数超过 {_MAX_POLL_ROUNDS} 轮仍未结束（mode={state.get('mode')}）",
+            },
+        }
 
     # resume：已解析产物直接派发（不经 MinerU 轮询与下载）
     if state.get("mode") == "resume":

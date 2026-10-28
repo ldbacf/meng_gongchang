@@ -72,7 +72,21 @@ async def _process_job(job) -> str:
 
 
 async def run_worker():
-    """消费循环（claim → 图 → ack）。"""
+    """消费循环（claim → 图 → ack）。
+
+    ## 失败必须显式 nack，不能只 log 后继续
+
+    原先这里是 `except Exception: log; sleep(5); continue` —— 消息留在
+    pending 里既没 ack 也没 nack，只能等 `queue_visibility_timeout`
+    （默认 1800s）到期才被 XAUTOCLAIM 回收重投。于是一次可重试的失败
+    （例如 `indexing → indexing` 非法迁移）会让这个批**固定卡 30 分钟**，
+    而且全程没有任何失败信号：界面上就是「索引中」一直不动。
+
+    现在按端口语义处理：
+      - `TransientError` → `nack()`：attempts+1 立即重投，超限进 DLQ。
+      - 其他异常（Fatal / 编程错误）→ 也走 `nack()`，让重试计数生效，
+        最终进 DLQ 而不是静默悬挂 —— 悬挂比失败更难排查。
+    """
     from app.infrastructure.container import get_container
     from app.infrastructure.observability.logger import get_logger, setup_logging
 
@@ -92,9 +106,25 @@ async def run_worker():
                 if job is None:
                     continue
                 log.info("收到任务", extra={"ctx": {"entry_id": job.entry_id}})
-                await _process_job(job)
+                try:
+                    outcome = await _process_job(job)
+                except Exception as e:
+                    # 显式 nack：立即重投（attempts+1），超限进 DLQ。
+                    # 不 nack 就要等 1800s 可见性超时，期间界面无任何反馈。
+                    log.error(
+                        "任务处理失败，nack 重投: %s",
+                        e,
+                        exc_info=True,
+                        extra={"ctx": {"entry_id": job.entry_id}},
+                    )
+                    await queue.nack(job.entry_id)
+                    await asyncio.sleep(2)  # 轻微退避，避免瞬间打满重试计数
+                    continue
                 await queue.ack(job.entry_id)
-                log.info("任务完成并 ack", extra={"ctx": {"entry_id": job.entry_id}})
+                log.info(
+                    "任务完成并 ack",
+                    extra={"ctx": {"entry_id": job.entry_id, "outcome": outcome}},
+                )
             except asyncio.CancelledError:
                 break
             except Exception as e:

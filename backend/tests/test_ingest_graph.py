@@ -262,6 +262,142 @@ def test_no_checkpointer_is_redline():
         build_ingest_graph()  # 缺 checkpointer 参数
 
 
+def test_resume_dispatch_is_declared_in_state():
+    """节点返回的 key 必须都在 IngestState 里声明。
+
+    LangGraph 只给 TypedDict 声明过的字段建 channel，**未声明的 key 会被
+    静默丢弃**（不报错）。`poll_parsed` 的 resume 分支曾返回
+    `resume_dispatch=True` 而 state 里没这个字段，导致：
+
+        poll_parsed →(读不到 resume_dispatch)→ pause_wait → poll_parsed → …
+
+    无限自旋。实测一个旧批 spin 到 poll_count=577、每 5 秒一轮，
+    独占唯一 worker，之后所有新上传文件的队列消息永远轮不到处理 ——
+    界面表现就是「一直卡在 MinerU 解析中」。
+
+    这条断言扫一遍所有节点的返回值 key，任何遗漏都会在这里红。
+    """
+    import inspect
+
+    from app.application.graphs.nodes.dispatch_index import dispatch_index
+    from app.application.graphs.nodes.download_unpack import download_unpack
+    from app.application.graphs.nodes.finalize import finalize
+    from app.application.graphs.nodes.poll_parsed import pause_wait, poll_parsed
+    from app.application.graphs.state import IngestState
+
+    declared = set(IngestState.__annotations__)
+    nodes = {
+        "poll_parsed": poll_parsed,
+        "pause_wait": pause_wait,
+        "download_unpack": download_unpack,
+        "dispatch_index": dispatch_index,
+        "finalize": finalize,
+    }
+
+    # 静态扫源码里 `return {...}` 的字面量 key —— 不执行节点（它们要真实 IO）
+    missing: dict[str, list[str]] = {}
+    for name, fn in nodes.items():
+        src = inspect.getsource(fn)
+        for line in src.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("return {"):
+                continue
+            for part in stripped[len("return {"):].rstrip("}").split(","):
+                key = part.split(":")[0].strip().strip('"\'')
+                if key and key.isidentifier() and key not in declared:
+                    missing.setdefault(name, []).append(key)
+
+    assert not missing, f"节点返回了未声明的 state key（会被 LangGraph 静默丢弃）: {missing}"
+    assert "resume_dispatch" in declared
+
+
+@pytest.mark.asyncio
+async def test_resume_mode_dispatches_without_spinning(monkeypatch):
+    """mode="resume" 必须一次走到 dispatch 就结束，不能反复回到 poll_parsed。
+
+    这是上面那条事故的最小复现：resume_dispatch 丢失时，图会在
+    pause_wait ↔ poll_parsed 之间自旋到 recursion_limit。
+    """
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.application.checkpoint_registry import config_for, thread_id_for_batch
+    from app.application.graphs.ingest_graph import build_ingest_graph
+    from app.application.graphs.subgraphs.index_document import (
+        build_index_document_graph,
+    )
+
+    container = AppContainer(fakes={
+        "mineru": _FakeMineru(), "minio": _FakeMinio(),
+        "embedder": _FakeEmbedder(), "milvus": _FakeMilvus(),
+        "index_subgraph": build_index_document_graph(InMemorySaver()),
+    })
+    set_container(container)
+
+    # dispatch_index 要按 md5 查 DB；这里只验证路由，不必落库
+    async def _no_task(md5):
+        return None
+
+    monkeypatch.setattr(
+        "app.application.graphs.nodes.dispatch_index.load_task", _no_task
+    )
+    try:
+        batch_id = f"t3res-{uuid.uuid4().hex[:8]}"
+        cfg = config_for(thread_id_for_batch(batch_id))
+        graph = build_ingest_graph(InMemorySaver())
+
+        await graph.ainvoke(
+            {
+                "batch_id": batch_id,
+                "md5_list": ["not-a-real-md5"],
+                "token_id": "",
+                "mode": "resume",
+                "poll_started_ts": time.time(),
+            },
+            cfg,
+        )
+
+        st = await graph.aget_state(cfg)
+        # 没有 interrupt = 没有回到 pause_wait；resume_dispatch 已被消费
+        assert not st.interrupts, "resume 批不该停在 pause_wait"
+        assert st.values.get("poll_count") == 1, (
+            f"poll_parsed 只该跑一次，实际 {st.values.get('poll_count')} 次（说明在自旋）"
+        )
+        assert st.values.get("resume_dispatch") is True
+        assert st.values.get("doc_results"), "应已派发到 dispatch_index"
+        assert not st.next, f"图应已结束，next={st.next}"
+    finally:
+        set_container(None)
+
+
+@pytest.mark.asyncio
+async def test_poll_round_cap_is_path_independent():
+    """轮次硬上限与路径无关：spins 兜底对 submit / resume 都生效。
+
+    墙钟超时只在 submit 路径生效（resume 提前 return，压根不读
+    poll_started_ts），所以必须有这道轮次上限，否则一旦 resume 分支
+    再出问题，worker 会被永久独占且界面上没有任何失败提示。
+    """
+    from app.application.graphs.nodes.poll_parsed import _MAX_POLL_ROUNDS, poll_parsed
+
+    container = AppContainer(fakes={
+        "mineru": _FakeMineru(), "minio": _FakeMinio(),
+        "embedder": _FakeEmbedder(), "milvus": _FakeMilvus(),
+    })
+    set_container(container)
+    try:
+        # 已超轮次上限的 resume 批 → 必须 fatal，而不是继续 dispatch/自旋
+        result = await poll_parsed({
+            "batch_id": "b-spin", "md5_list": ["m"], "token_id": "",
+            "mode": "resume", "poll_count": _MAX_POLL_ROUNDS,
+        })
+        assert result["fatal"] is True
+        assert result["error"]["step"] == "poll"
+        assert str(_MAX_POLL_ROUNDS) in result["error"]["message"]
+        assert "resume_dispatch" not in result
+    finally:
+        set_container(None)
+
+
 @pytest.mark.asyncio
 async def test_retry_from_checkpoint_resume(ingest_env, monkeypatch):
     """T-3.8: 批失败后（fatal）同 thread 续跑（checkpoint 恢复语义）。"""

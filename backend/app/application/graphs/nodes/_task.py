@@ -56,26 +56,43 @@ async def ensure_parsed(md5: str) -> DocumentTask | None:
 
 
 async def mark_indexing(md5: str) -> DocumentTask | None:
-    """PARSED→INDEXING（索引开始）。"""
+    """PARSED→INDEXING（索引开始）。
+
+    **必须幂等**：图是 at-least-once 的，`index_document` 子图会因崩溃恢复 /
+    队列重投 / resume 重跑而从 `load_context` 重新进入。此时库里已经是
+    INDEXING，状态机的迁移表里 `INDEXING → INDEXING` 不是合法边，直接抛
+    `InvalidStatusTransition: 非法状态迁移: indexing → indexing`。
+
+    这个异常曾把整条流水线拖住：`_process_job` 在 `graph.ainvoke` 抛出后
+    既不 ack 也不 nack（见 worker.py），消息只能靠 1800s 可见性超时重投，
+    于是每次重试都固定多等 30 分钟，表现为「索引中」长时间不动。
+
+    已经是 INDEXING 或更靠后的状态就原样返回，不重复迁移。
+    """
     from app.infrastructure.container import get_container
 
     async with get_container().get_db_sessionmaker()() as session:
         r = await session.execute(select(DocumentTask).where(DocumentTask.md5 == md5))
         task = r.scalar_one_or_none()
-        if task:
-            task.set_status(TaskStatus.INDEXING)
-            await session.commit()
+        if task is None:
+            return None
+        if task.status == TaskStatus.INDEXING.value:
+            return task  # 重入：已在该阶段，无需迁移
+        if task.status == TaskStatus.READY.value:
+            return task  # 已完成：子图靠 dispatch_index 的 READY 判断跳过
+        task.set_status(TaskStatus.INDEXING)
+        await session.commit()
         return task
 
 
 async def mark_ready(md5: str) -> None:
-    """INDEXING→READY（索引完成）。"""
+    """INDEXING→READY（索引完成）。同样幂等：已是 READY 就跳过。"""
     from app.infrastructure.container import get_container
 
     async with get_container().get_db_sessionmaker()() as session:
         r = await session.execute(select(DocumentTask).where(DocumentTask.md5 == md5))
         task = r.scalar_one_or_none()
-        if task:
+        if task and task.status != TaskStatus.READY.value:
             task.set_status(TaskStatus.READY)
             await session.commit()
 
