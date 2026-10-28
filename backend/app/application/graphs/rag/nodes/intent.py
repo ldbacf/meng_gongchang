@@ -10,15 +10,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 from app.application.graphs.rag.nodes._common import last_context_from_history
 from app.application.graphs.rag.nodes._emit import emit_step
-from app.application.rag.rag_metrics import build_rag_step
+from app.application.rag.rag_metrics import build_rag_step, describe_exception
 from app.domain.knowledge_base import KBKind
 from app.domain.rag.intent import IntentResult
 from app.infrastructure.adapters.ports_impl import get_generation_adapter
 from app.infrastructure.container import get_container
+
+logger = logging.getLogger(__name__)
 
 
 async def intent(state: dict) -> dict:
@@ -34,12 +37,28 @@ async def intent(state: dict) -> dict:
 
     result = None
     degraded = False
+    degraded_reason = ""
+    degraded_exc: BaseException | None = None
     try:
         result = await asyncio.to_thread(gen.analyze, query, last_context, kb_kind)
         # API 失败时 analyze 返回 fallback（domain/coverage 为空）→ 判定降级
-        degraded = not (bool(result.domain) or bool(result.coverage))
-    except Exception:
-        degraded = True
+        if not (bool(result.domain) or bool(result.coverage)):
+            degraded = True
+            degraded_reason = "意图模型返回空结果（domain / coverage 均为空）"
+    except Exception as exc:
+        degraded, degraded_exc = True, exc
+
+    # 降级留痕：意图降级会让 coverage 变 unknown → 一律走检索（保守），
+    # 行为是对的，但用户与日志都看不到"这一步其实失败了"。
+    if degraded:
+        if degraded_exc is not None:
+            degraded_reason = describe_exception(degraded_exc)
+        logger.warning(
+            "意图识别降级，按 coverage=unknown 继续检索: %s",
+            degraded_reason,
+            exc_info=degraded_exc,
+            extra={"ctx": {"query": query, "kb_kind": kb_kind.value}},
+        )
 
     sr = result or IntentResult()
     rewritten = sr.rewritten_query or query
@@ -56,6 +75,7 @@ async def intent(state: dict) -> dict:
         "intent", elapsed_ms=elapsed_ms,
         domain=sr.domain, coverage=sr.coverage, rewritten_query=rewritten,
         keywords=sr.keywords, suggestion=sr.suggestion, degraded=degraded,
+        degraded_reason=degraded_reason,
     )
     await emit_step("intent", "done", elapsed_ms=elapsed_ms, metrics=step["metrics"])
 

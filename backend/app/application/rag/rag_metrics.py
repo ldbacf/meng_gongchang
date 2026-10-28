@@ -6,6 +6,20 @@
 
 `degraded` 字段：任一步降级（intent 失败直通 / rerank 失败保序 / 检索异常）显式置
 true，对应 A-4.5 / T-4.6（降级可观测，不再静默）。
+
+## `degraded_reason`：让「没找到」和「检索挂了」长得不一样
+
+`degraded=True` 只说明「这一步没正常工作」，没说为什么。真实事故里
+Milvus 因为字段名写错抛了 `MilvusException: field title not exist`，被
+`except Exception: degraded = True` 吞掉 —— 向量路恒 0 条，rerank 分数被拉低，
+最终回答「知识库中未找到相关文献」。**用户看到的是"这个库确实没有"，而
+真相是"检索链路坏了"**，两者在界面上完全相同。
+
+所以降级时额外带上 `degraded_reason`（异常类名 + 首行消息），前端可据此把
+「本次为降级结果」显式标出来。
+
+**只在降级时出现**：不降级时该 key 不存在，保持既有字段集契约不变
+（`test_sse_rag.py::test_metrics_single_source_fields` 对键集做精确断言）。
 """
 from __future__ import annotations
 
@@ -25,48 +39,76 @@ STEP_MODELS = {
     "fusion": "Qwen3-Reranker-4B",
 }
 
+#: 降级原因的最大长度（异常消息可能很长，而它要进 SSE 帧与数据库 JSONB）
+_MAX_REASON_CHARS = 200
+
+
+def describe_exception(exc: BaseException | None) -> str:
+    """把异常压成一行可读原因：`类名: 首行消息`。
+
+    只取首行：pymilvus 的异常消息里带多行栈式描述，整段塞进 metrics 既没人看
+    也撑大 SSE 帧。给不出异常（如"静默全零分"这类非异常降级）时返回空串，
+    由调用方自己给一句说明。
+    """
+    if exc is None:
+        return ""
+    name = type(exc).__name__
+    msg = str(exc).strip().splitlines()
+    first = msg[0].strip() if msg else ""
+    text = f"{name}: {first}" if first else name
+    return text[:_MAX_REASON_CHARS]
+
+
+def _with_reason(metrics: dict, degraded_reason: str) -> dict:
+    """降级原因非空才写进 metrics（不降级时保持键集不变）。"""
+    if degraded_reason:
+        metrics["degraded_reason"] = degraded_reason
+    return metrics
+
 
 def _intent_metrics(
     *, domain="", coverage="", rewritten_query="", keywords=None,
-    suggestion="", degraded=False,
+    suggestion="", degraded=False, degraded_reason="",
 ) -> dict:
-    return {
+    return _with_reason({
         "domain": domain or "通用",
         "coverage": coverage or "unknown",
         "rewritten_query": rewritten_query or "",
         "keywords": keywords or [],
         "suggestion": suggestion or "",
         "degraded": degraded,
-    }
+    }, degraded_reason)
 
 
 def _retrieval_metrics(
     *, milvus_hits=0, es_hits=0, after_dedup=0, routing="", degraded=False,
+    degraded_reason="",
 ) -> dict:
-    return {
+    return _with_reason({
         "milvus_hits": milvus_hits,
         "es_hits": es_hits,
         "after_dedup": after_dedup,
         "routing": routing or "es_only",
         "degraded": degraded,
-    }
+    }, degraded_reason)
 
 
 def _fusion_metrics(
     *, input_count=0, output_count=0, top_scores=None, degraded=False,
+    degraded_reason="",
 ) -> dict:
-    return {
+    return _with_reason({
         "input_count": input_count,
         "output_count": output_count,
         "model": STEP_MODELS["fusion"],
         "top_scores": top_scores or [],
         "degraded": degraded,
-    }
+    }, degraded_reason)
 
 
 def _answer_metrics(
     *, context_chunks=0, total_tokens=0, total_elapsed_ms=0, degraded=False,
-    route="retrieval",
+    route="retrieval", degraded_reason="",
 ) -> dict:
     """answer 步 metrics。`model` **取自配置**（`settings.deepseek_answer_model`）。
 
@@ -76,14 +118,14 @@ def _answer_metrics(
     """
     from app.infrastructure.settings import get_settings
 
-    return {
+    return _with_reason({
         "model": get_settings().deepseek_answer_model,
         "context_chunks": context_chunks,
         "total_tokens": total_tokens,
         "total_elapsed_ms": total_elapsed_ms,
         "route": route,
         "degraded": degraded,
-    }
+    }, degraded_reason)
 
 
 _BUILDERS = {

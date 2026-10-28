@@ -142,8 +142,24 @@ function prettyKey(k: string): string {
  * `live` 是标记位、`stage` 是内部阶段名、`es_total` 是进度分母 —— 它们服务于
  * 待答提示那句「已召回 12 篇」，对用户没有信息量。不过滤的话明细区会出现
  * 「live  true」「stage  es」这类噪声行。
+ *
+ * `degraded` / `degraded_reason` 也不进明细：它们单独渲染成一条警示条
+ * （见 `degradedReason`），混在指标网格里既看不见、也会被当成普通字段。
  */
-const INTERNAL_METRIC_KEYS = new Set(['live', 'stage', 'es_total'])
+const INTERNAL_METRIC_KEYS = new Set(['live', 'stage', 'es_total', 'degraded', 'degraded_reason'])
+
+/**
+ * 降级原因 —— 把「没找到」和「检索挂了」区分开。
+ *
+ * 真实事故：Milvus 字段名写错导致向量路恒 0 条，最终回答「知识库中未找到
+ * 相关文献」。用户以为是"这个库确实没有"，而真相是检索链路坏了 ——
+ * 两者在界面上原本完全相同。后端现在把原因放进 metrics，这里显式提示。
+ */
+function degradedReason(key: StepKey): string {
+  const m = get(key)?.metrics as Record<string, unknown> | undefined
+  if (!m || !m.degraded) return ''
+  return String(m.degraded_reason ?? '该步骤未正常完成，本次结果可能不完整')
+}
 
 function metricEntries(key: StepKey): { k: string; v: string }[] {
   const m = get(key)?.metrics as Record<string, unknown> | undefined
@@ -192,6 +208,13 @@ function metricEntries(key: StepKey): { k: string; v: string }[] {
           </span>
           <span class="text-[11.5px] text-faint">{{ r.sub }}</span>
 
+          <!-- 降级标记：折叠状态下也要能看见，否则用户不知道这次结果是降级的 -->
+          <span
+            v-if="degradedReason(r.key)"
+            class="shrink-0 rounded-full bg-warn-soft px-1.5 py-px text-[10px] font-medium text-warn"
+            :title="degradedReason(r.key)"
+          >降级</span>
+
           <span class="ml-auto shrink-0 font-mono text-[11.5px] tabular-nums text-faint">
             {{ elapsed(r.key) }}
           </span>
@@ -219,6 +242,18 @@ function metricEntries(key: StepKey): { k: string; v: string }[] {
             <div class="mb-1.5 ml-[22px] mt-1 rounded-md border border-line bg-canvas px-3 py-2.5">
               <p v-if="typed[r.key] || r.step.summary" class="mb-2 text-[12px] leading-relaxed text-ink-2">
                 {{ typed[r.key] || r.step.summary }}
+              </p>
+
+              <!-- 降级说明：展开后给出具体原因（异常类名 + 首行消息） -->
+              <p
+                v-if="degradedReason(r.key)"
+                class="mb-2 flex items-start gap-1.5 rounded border-l-2 border-warn bg-warn-soft/40 py-1 pl-2 pr-1.5 text-[11.5px] leading-relaxed text-warn"
+              >
+                <span class="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-warn" />
+                <span class="min-w-0">
+                  该步骤降级，结果可能不完整
+                  <span class="block font-mono text-[10.5px] opacity-80">{{ degradedReason(r.key) }}</span>
+                </span>
               </p>
 
               <div v-if="metricEntries(r.key).length" class="grid grid-cols-2 gap-x-5 gap-y-0.5">

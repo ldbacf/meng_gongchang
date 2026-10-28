@@ -16,7 +16,7 @@ import logging
 import time
 
 from app.application.graphs.rag.nodes._emit import emit_step
-from app.application.rag.rag_metrics import build_rag_step
+from app.application.rag.rag_metrics import build_rag_step, describe_exception
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,8 @@ async def retrieval(state: dict) -> dict:
             await emit_step("retrieval", "pending", metrics=sample)
 
     degraded = False
+    degraded_reason = ""
+    degraded_exc: BaseException | None = None
     m_hits: list = []
     e_hits: list = []
     try:
@@ -90,10 +92,33 @@ async def retrieval(state: dict) -> dict:
                 search.recall_dual, search_query,
                 es_index=kb.get("es_index"), milvus_collection=kb.get("milvus_collection"),
             )
-        except Exception:
-            degraded = True
-    except Exception:
-        degraded = True
+        except Exception as exc:
+            degraded, degraded_exc = True, exc
+    except Exception as exc:
+        degraded, degraded_exc = True, exc
+
+    # ── 降级必须留痕 ──
+    #
+    # 这里曾是一个裸 `except Exception: degraded = True`（连 logger 都没用，
+    # 虽然本模块早就声明了 `logger`）。于是 Milvus 因字段名写错抛的
+    # `field title not exist` 被彻底吞掉：向量路恒 0 条、rerank 分数被拉低、
+    # 最终回答「知识库中未找到相关文献」—— 用户以为是"库里没有"，
+    # 实际是"检索链路坏了"，而排查时日志里一个字都没有。
+    #
+    # 现在降级时记 ERROR（含完整栈）并把原因带进 metrics，让下一次同类问题
+    # 既能查日志、也能在界面上看出来。
+    if degraded:
+        degraded_reason = describe_exception(degraded_exc) or "检索异常（无异常对象）"
+        logger.error(
+            "检索降级，本次回答仅基于部分召回: %s",
+            degraded_reason,
+            exc_info=degraded_exc,
+            extra={"ctx": {
+                "es_index": kb.get("es_index"),
+                "milvus_collection": kb.get("milvus_collection"),
+                "query": search_query,
+            }},
+        )
 
     # 采样回放：必须在 emit done 之前，否则前端会看到「done 之后又回到 pending」
     await _replay()
@@ -113,6 +138,7 @@ async def retrieval(state: dict) -> dict:
         "retrieval", elapsed_ms=elapsed_ms,
         milvus_hits=milvus_count, es_hits=es_count,
         after_dedup=after_dedup, routing=routing, degraded=degraded,
+        degraded_reason=degraded_reason,
     )
     await emit_step("retrieval", "done", elapsed_ms=elapsed_ms, metrics=step["metrics"])
 

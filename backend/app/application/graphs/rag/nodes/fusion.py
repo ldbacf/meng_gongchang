@@ -9,11 +9,14 @@ rerank 经 `domain.ports.retrieval.RetrievalPort`（adapters.ports_impl 实现�
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 from app.application.graphs.rag.nodes._emit import emit_step
-from app.application.rag.rag_metrics import build_rag_step
+from app.application.rag.rag_metrics import build_rag_step, describe_exception
 from app.domain.retrieval.rrf import rrf_fusion
+
+logger = logging.getLogger(__name__)
 
 
 async def _rerank(query: str, hits: list):
@@ -46,15 +49,30 @@ async def fusion(state: dict) -> dict:
         })
 
     degraded = False
+    degraded_reason = ""
+    degraded_exc: BaseException | None = None
     reranked = list(fused)
     try:
         reranked = await _rerank(query, fused)
         # 静默失败信号：有 hits 但重排后无一条正分 → 判降级（rerank 内部吞异常不抛）
         if fused and all(getattr(h, "score_rerank", 0) <= 0 for h in reranked):
             degraded = True
-    except Exception:
+            degraded_reason = "重排全部返回 0 分（服务可能未生效或额度耗尽）"
+    except Exception as exc:
         reranked = list(fused)
-        degraded = True
+        degraded, degraded_exc = True, exc
+
+    # 降级留痕：与 retrieval 同理 —— 静默降级时排序退化成 RRF 顺序，
+    # 答案质量下降却没有任何信号，排查时无从下手。
+    if degraded:
+        if degraded_exc is not None:
+            degraded_reason = describe_exception(degraded_exc)
+        logger.warning(
+            "重排降级，保序返回 RRF 结果: %s",
+            degraded_reason,
+            exc_info=degraded_exc,
+            extra={"ctx": {"query": query, "input_count": len(fused)}},
+        )
 
     top_scores = [round(h.score_rerank, 3) for h in reranked[:5] if h.score_rerank > 0]
 
@@ -72,6 +90,7 @@ async def fusion(state: dict) -> dict:
         "fusion", elapsed_ms=elapsed_ms,
         input_count=len(fused), output_count=len(reranked),
         top_scores=top_scores, degraded=degraded,
+        degraded_reason=degraded_reason,
     )
     await emit_step("fusion", "done", elapsed_ms=elapsed_ms, metrics=step["metrics"])
 
