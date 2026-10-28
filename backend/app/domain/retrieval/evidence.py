@@ -60,6 +60,19 @@ class AbstractSection:
 # ── 摘要分段 ──────────────────────────────────────────────────
 
 
+def _strip_section_key(body: str, key: str) -> str:
+    """去掉段落开头的段键本身（`结论 社区H型…` → `社区H型…`）。
+
+    段键已经单独放在 `AbstractSection.key` 里，正文再带一遍会导致
+    证据卡上出现「**结论** 结论 基于三级防控…」这样的重复。
+    段键中间可能有空格（MinerU 会输出「目 的」），所以按字符放宽匹配。
+    """
+    if len(key) != 2:
+        return body
+    m = re.match(re.escape(key[0]) + r"\s*" + re.escape(key[1]) + r"\s*[：:]?\s*", body)
+    return body[m.end():].strip() if m else body
+
+
 def split_abstract_sections(raw: str | None) -> list[AbstractSection]:
     """把 `abstract_cn` 切成「背景/目的/方法/结果/结论」段。
 
@@ -71,6 +84,9 @@ def split_abstract_sections(raw: str | None) -> list[AbstractSection]:
     段短于 `_MIN_SECTION_CHARS` 的会被丢弃：`abstract_cn` 里出现过
     「…进行综述，探索其发病机制及可能的治疗方法。方法。」这种残句，
     段键正则会在句尾命中一个孤立的「方法。」，切出来毫无意义。
+
+    返回的 `text` **不含段键**：段键在 `key` 字段里，重复一遍会在界面上
+    出现「结论 结论 …」。
     """
     text = _ABSTRACT_LABEL_RE.sub("", (raw or "").strip())
     if not text:
@@ -88,7 +104,7 @@ def split_abstract_sections(raw: str | None) -> list[AbstractSection]:
     sections: list[AbstractSection] = []
     for i, (start, key) in enumerate(found):
         end = found[i + 1][0] if i + 1 < len(found) else len(text)
-        body = text[start:end].strip()
+        body = _strip_section_key(text[start:end].strip(), key)
         if len(body) < _MIN_SECTION_CHARS:
             continue
         sections.append(AbstractSection(key=key, text=body))

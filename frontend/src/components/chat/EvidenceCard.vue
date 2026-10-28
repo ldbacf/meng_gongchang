@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { EvidenceResponse } from '@/api/citation'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { FileText, Loader2 } from 'lucide-vue-next'
 
 /**
@@ -14,25 +14,55 @@ import { FileText, Loader2 } from 'lucide-vue-next'
  * 而摘要、样本量、命中章节这些数据随 `/evidence` 一次返回（毫秒级），
  * 足够回答"这篇文章支持这个结论吗"。
  *
- * ## 排版原则：连续文本，不是方块拼接
+ * ## 读者的动线：先看被引的那段，再看这是一篇什么文章
  *
- * 上下文刻意渲染成**一段连续的话**（上文 → 命中 → 下文），而不是三个
- * 带边框的独立 block。原文本来就是连续的，只是被 chunk 边界切开了；
- * 拆成方块会让读者自己做心理拼接。命中段落用淡色背景铺满行宽，
- * `box-decoration-break: clone` 保证换行处底色不断。
+ * 用户点 [2] 想确认的是「[2] 这句引用到底出自哪里、原文怎么说的」，
+ * 所以**被引原文排在最前**（「引用原文」），文献出处与摘要退到它后面。
+ * 早先的版本把标题、作者、核心结论、摘要、原文片段依次堆下来，
+ * 被引的那段正文排在屏幕第 700 多像素处，得滚一屏才看见 ——
+ * 读者反馈的"信息很多但都不对"就是这个顺序造成的。
  *
- * ## 缺字段时诚实降级
+ * ## 上下文只画「逻辑」，不铺成一锅粥
  *
- * - 无结构式摘要（1248 篇中 337 篇）→ 不用伪造的「结论」，改用命中段落首句，
- *   并明确标注「本文摘要无结论段」
- * - 抽不到样本量 / 抽到的是文献篇数 → 该标签不渲染，而不是显示 0 或错标
- * - 无证据等级字段（全库都没有）→ 绝不显示
+ * 早期实现把前一块、命中块、后一块不分主次地连排，命中块只加深一点底色。
+ * 结果是一屏连续文字里读者分不清哪句是被引的 —— 上下文反而成了噪音。
+ * 现在：
+ *   - 默认**只显示命中块**，且明确标注「被引原文」
+ *   - 点「显示上下文」才展开前后块，并各带一行 `上文 · <章节>` / `下文 · <章节>`，
+ *     让读者知道这块和命中块是什么关系（同一节还是上一节）
+ *
+ * ## 只给读者看该看的东西
+ *
+ * 这里踩过一次真实的坑：初版把数据来源也印在界面上（`doc-meta · abstract_cn`、
+ * `ES chunks · L1`、`doc_id=`），还为了塞进窄栏把正文压到 12.5–13px。
+ * 结果是**信息很挤，但都不是读者要的信息**。
+ *
+ * 现在的规矩：
+ *   - 界面文字只出现文献本身的信息（标题/作者/期刊/摘要/正文）
+ *   - 实现细节（字段名、桶名、chunk 层级、doc_id）一律不渲染
+ *   - 正文 15px / 行高 1.95，先保证能读，再考虑一屏能放多少
+ *
+ * ## 缺字段时诚实降级，但**不编结论**
+ *
+ * 无结构式摘要（指南与综述常见）时不伪造结论段：
+ * 没有 `结论` 段就整个不渲染「核心结论」，而不是拿正文首句冒充 ——
+ * 正文首句就在下面的「引用原文」里，冒充一次等于同一段话印两遍，
+ * 还让读者以为那是作者的结论。
  */
 const props = defineProps<{
   evidence: EvidenceResponse | null
   loading: boolean
   /** 展示 PDF 的动作由父组件决定（面板里是切换视图，测试里是 spy） */
   pdfAvailable: boolean
+  /**
+   * 引用片段本身（`citation.snippet`）。
+   *
+   * 后端返回的 `hit_paragraphs` 是**整个 chunk**，而 snippet 只是它的前 200 字。
+   * 8285 那一块的 chunk 有 11 段（2.13 合并了 2.13.1–2.13.5），原样铺出来
+   * 就是一屏看不到头的正文墙 —— 读者反而找不到"引用的到底是哪句"。
+   * 所以用 snippet 圈出开头被引的那几段，其余折进「本节其余」。
+   */
+  snippet?: string
 }>()
 
 const emit = defineEmits<{
@@ -41,45 +71,34 @@ const emit = defineEmits<{
 }>()
 
 const abstractOpen = ref(false)
-const passageOnlyHit = ref(false)
+const contextOpen = ref(false)
+const passageOpen = ref(false)
+
+/** 换了一篇文献就把展开状态收回去，否则上一条的展开会带过来 */
+watch(
+  () => props.evidence?.doc_id,
+  () => {
+    abstractOpen.value = false
+    contextOpen.value = false
+    passageOpen.value = false
+  },
+)
 
 /** 结构式摘要为空 → 该文只有单段叙述式摘要 */
 const hasSections = computed(
   () => (props.evidence?.abstract_sections?.length ?? 0) > 0,
 )
 
-/**
- * 结论句。
- *
- * 优先取结构式摘要的「结论」段；没有就退回最后一个有内容的段
- * （「结果」段通常也能说明问题）。两者都没有时返回空串，
- * 由模板显示降级提示 —— 不编造。
- */
+/** 结论段：只在摘要真的分了「结论」时才有，没有就是空串（模板据此整块隐藏） */
 const conclusionText = computed(() => {
   const sections = props.evidence?.abstract_sections ?? []
-  const conclusion = sections.find((s) => s.key === '结论')
-  if (conclusion?.text) return conclusion.text
-  return ''
+  return sections.find((s) => s.key === '结论')?.text ?? ''
 })
 
 /** 非结论段的其余分段，按期刊顺序（背景/目的/方法/结果） */
 const otherSections = computed(() =>
   (props.evidence?.abstract_sections ?? []).filter((s) => s.key !== '结论'),
 )
-
-/**
- * 降级用的「核心句」：命中段落的第一段。
- *
- * 只在没有结论段时使用，且模板里会明确标注来源 —— 让用户知道
- * 这句话不是作者写的结论，而是我们挑出来的正文片段。
- */
-const fallbackSentence = computed(() => {
-  const first = props.evidence?.passage?.hit_paragraphs?.[0] ?? ''
-  if (!first) return ''
-  // 截到第一个句末标点，避免把整段贴上来
-  const m = first.match(/^[^。！？；]+[。！？；]?/)
-  return (m ? m[0] : first).trim()
-})
 
 const sampleLabel = computed(() => {
   const s = props.evidence?.sample_size
@@ -89,28 +108,106 @@ const sampleLabel = computed(() => {
   return `样本量 ${s.value.toLocaleString()} ${s.unit}`
 })
 
-/** 类型徽章配色：指南 / Meta / 论著 / 综述 各有区分 */
+/** 类型着色：指南 / Meta / 论著 / 综述 各有区分 */
 const typeClass = computed(() => {
   const t = props.evidence?.article_type ?? ''
-  if (/指南|共识|规范|标准/.test(t)) return 'badge-guide'
-  if (/循证|Meta/i.test(t)) return 'badge-meta'
-  if (/综述|述评|笔谈/.test(t)) return 'badge-review'
-  return 'badge-study'
+  if (/指南|共识|规范|标准/.test(t)) return 'is-guide'
+  if (/循证|Meta/i.test(t)) return 'is-meta'
+  if (/综述|述评|笔谈/.test(t)) return 'is-review'
+  return 'is-study'
 })
 
 const passage = computed(() => props.evidence?.passage ?? null)
+
+/** 命中位置的章节路径 —— 这是读者的定位信息，保留 */
+const hitHeading = computed(() => passage.value?.hit_heading ?? '')
+
+const hitParagraphs = computed(() => passage.value?.hit_paragraphs ?? [])
+
+/** 去标点/空白后比较，前端只用来判边界，不做任何展示 */
+function normForMatch(s: string): string {
+  return s.replace(/[\s，。、；：！？…—－·,.;:!?'"“”‘’（）()《》〈〉【】[\]]+/g, '')
+}
+
+/**
+ * 命中块按「被引的那几段」与「本节其余」切开。
+ *
+ * 后端给的 `hit_paragraphs` 是**整个 chunk**：8285 的 2.13 一节合并了
+ * 2.13.1–2.13.5，共 11 段；而 `citation.snippet` 只截了它的前 200 字。
+ * 原样铺开就是一屏望不到头的正文，读者反而找不到引用落在哪一句。
+ *
+ * 所以按 snippet 的长度去数「前几段合起来够长」，超出的部分折进
+ * 「本节其余 N 段」。数不准时也只是多折/少折一段，不会漏掉正文。
+ */
+const hitSplit = computed(() => {
+  const paras = hitParagraphs.value
+  // 本来就不长的块不必拆
+  if (paras.length <= 3) return { lead: paras, rest: [] as string[] }
+
+  const target = normForMatch(props.snippet ?? '')
+  let n = target ? 0 : 3
+  if (target) {
+    let acc = ''
+    for (const p of paras) {
+      acc += normForMatch(p)
+      n += 1
+      if (acc.length >= target.length) break
+    }
+  }
+  // 至少 1 段、至多留 1 段给「其余」，避免出现「其余 0 段」的空控件
+  const cut = Math.max(1, Math.min(n, paras.length - 1))
+  return { lead: paras.slice(0, cut), rest: paras.slice(cut) }
+})
+
+const restCount = computed(() => hitSplit.value.rest.length)
+
+const canToggleContext = computed(
+  () => !!(passage.value?.has_prev || passage.value?.has_next),
+)
+
+/**
+ * 前后块的标签只取章节路径末段。
+ *
+ * `prev_heading` 是完整路径（`2 认识高血压 → 2.12 … → 2.12.2 戒烟技巧`），
+ * 整条印在上下文里比正文还长。读者只需要知道"这是 2.12.2 那段"。
+ */
+function lastSegment(path: string): string {
+  if (!path) return ''
+  const parts = path.split('→')
+  return parts[parts.length - 1].trim()
+}
+
+/** 与命中块同节时不必重复章节名，标点位置即可 */
+const prevLabel = computed(() => {
+  const p = passage.value
+  if (!p?.has_prev) return ''
+  const name = lastSegment(p.prev_heading)
+  return name && p.prev_heading !== p.hit_heading ? `上文 · ${name}` : '上文'
+})
+
+const nextLabel = computed(() => {
+  const p = passage.value
+  if (!p?.has_next) return ''
+  const name = lastSegment(p.next_heading)
+  return name && p.next_heading !== p.hit_heading ? `下文 · ${name}` : '下文'
+})
+
+/** 可复制的文本：优先被引原文，没有原文时退回结论段 */
+const copyText = computed(() => {
+  if (hitParagraphs.value.length) return hitParagraphs.value.join('\n\n')
+  return conclusionText.value
+})
 
 function toggleAbstract() {
   abstractOpen.value = !abstractOpen.value
 }
 
-function toggleOnlyHit() {
-  passageOnlyHit.value = !passageOnlyHit.value
+function toggleContext() {
+  contextOpen.value = !contextOpen.value
 }
 
-function copyConclusion() {
-  const text = conclusionText.value || fallbackSentence.value
-  if (text) emit('copy', text)
+function doCopy() {
+  if (copyText.value) emit('copy', copyText.value)
 }
 </script>
 
@@ -119,390 +216,344 @@ function copyConclusion() {
     <!-- 加载态 -->
     <div v-if="loading" class="flex flex-1 items-center justify-center gap-2">
       <Loader2 :size="16" class="animate-spin text-accent" />
-      <span class="text-[12.5px] text-muted">加载文献信息…</span>
+      <span class="text-[13px] text-muted">加载文献信息…</span>
     </div>
 
     <!-- 空态 -->
     <div
       v-else-if="!evidence"
-      class="flex flex-1 items-center justify-center px-6 text-center text-[12.5px] text-faint"
+      class="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-faint"
     >
       暂无该文献的详细信息
     </div>
 
     <!-- 正文 -->
-    <div v-else class="flex-1 overflow-y-auto px-4 py-4">
-      <!-- 标题与元信息 -->
-      <h3 class="mb-1.5 text-[14px] font-semibold leading-snug text-ink">
-        {{ evidence.title || '未知标题' }}
-      </h3>
-      <p v-if="evidence.authors" class="mb-1 text-[12px] leading-relaxed text-muted">
-        {{ evidence.authors }}
-      </p>
-      <p class="text-[11.5px] text-faint">
-        <span class="font-medium text-muted">{{ evidence.year }}</span>
-        <template v-if="evidence.journal"> · {{ evidence.journal }}</template>
-        <template v-if="evidence.source"> · {{ evidence.source }}</template>
-      </p>
+    <div v-else class="ev-scroll flex-1 overflow-y-auto px-6 py-6">
+      <!-- ── 被引原文（读者点引用就是来看这个，排最前） ── -->
+      <section v-if="passage" class="ev-first">
+        <h4 class="ev-h">引用原文</h4>
 
-      <!-- 标签行：只渲染真实有值的字段 -->
-      <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
-        <span v-if="evidence.article_type" class="ev-badge" :class="typeClass">
-          {{ evidence.article_type }}
-        </span>
-        <span v-if="sampleLabel" class="ev-badge">{{ sampleLabel }}</span>
-        <span v-if="hasSections" class="ev-badge badge-ok">结构式摘要</span>
-        <span v-else class="ev-badge badge-weak">无结论段</span>
-      </div>
+        <p v-if="hitHeading" class="ev-locate">{{ hitHeading }}</p>
 
-      <!-- ── 核心结论 ── -->
-      <section class="mt-4">
-        <h4 class="ev-section-title">
-          核心结论
-          <span v-if="!conclusionText" class="ev-section-note">
-            取自正文 {{ passage?.hit_heading || '命中章节' }}
-          </span>
-          <span v-else class="ev-section-note">abstract_cn · 结论</span>
-        </h4>
-        <blockquote v-if="conclusionText" class="ev-quote">
-          {{ conclusionText }}
-        </blockquote>
-        <blockquote v-else-if="fallbackSentence" class="ev-quote ev-quote-fallback">
-          {{ fallbackSentence }}
-          <span class="ev-fallback-note">
-            本文摘要没有「结论」段（指南与综述常见，全库 1248 篇中 337 篇如此），
-            此处引用的是命中正文的核心句，不是作者写的结论。
-          </span>
-        </blockquote>
-        <p v-else class="text-[12px] text-faint">该文献无可提取的结论句。</p>
+        <div class="ev-hit-group">
+          <p v-for="(para, i) in hitSplit.lead" :key="i" class="ev-para">
+            {{ para }}
+          </p>
+
+          <!-- 一节被 chunk 合并了多段时，只铺开被引的那几段，其余折起来 -->
+          <template v-if="restCount">
+            <div v-if="passageOpen" class="ev-rest">
+              <p v-for="(para, i) in hitSplit.rest" :key="i" class="ev-para">
+                {{ para }}
+              </p>
+            </div>
+            <button class="ev-more" @click="passageOpen = !passageOpen">
+              {{
+                passageOpen
+                  ? '收起本节其余内容'
+                  : `展开本节其余 ${restCount} 段`
+              }}
+            </button>
+          </template>
+        </div>
+
+        <!-- 上下文默认收起：一屏连续文字里读者分不清哪句是被引的 -->
+        <template v-if="canToggleContext">
+          <button class="ev-more" @click="toggleContext">
+            {{ contextOpen ? '收起上下文' : '显示上下文' }}
+          </button>
+
+          <div v-if="contextOpen" class="ev-ctx">
+            <div v-if="passage.has_prev" class="ev-ctx-block">
+              <p class="ev-ctx-label">{{ prevLabel }}</p>
+              <p class="ev-para">{{ passage.prev_text }}</p>
+            </div>
+            <div v-if="passage.has_next" class="ev-ctx-block">
+              <p class="ev-ctx-label">{{ nextLabel }}</p>
+              <p class="ev-para">{{ passage.next_text }}</p>
+            </div>
+          </div>
+        </template>
       </section>
 
-      <!-- ── 摘要 ── -->
-      <section v-if="evidence.abstract_raw" class="mt-4">
-        <h4 class="ev-section-title">
+      <!-- 未定位到命中章节：说明原因，但不挡后面的摘要 -->
+      <p v-else-if="evidence.message" class="ev-note">{{ evidence.message }}</p>
+
+      <!-- ── 出处 ── -->
+      <header class="ev-head" :class="{ 'has-first': !!passage }">
+        <h3 class="ev-title">{{ evidence.title || '未知标题' }}</h3>
+        <p v-if="evidence.authors" class="ev-authors">{{ evidence.authors }}</p>
+        <p class="ev-source">
+          <span class="ev-year">{{ evidence.year }}</span>
+          <template v-if="evidence.journal"> · {{ evidence.journal }}</template>
+          <template v-if="evidence.article_type">
+            ·
+            <span class="ev-type" :class="typeClass">{{ evidence.article_type }}</span>
+          </template>
+        </p>
+        <!-- 只有真实有值的字段才出现 -->
+        <p v-if="sampleLabel" class="ev-sample">{{ sampleLabel }}</p>
+      </header>
+
+      <!-- ── 核心结论（只有摘要真的分了「结论」段才出现） ── -->
+      <section v-if="conclusionText" class="ev-sec">
+        <h4 class="ev-h">核心结论</h4>
+        <blockquote class="ev-quote">{{ conclusionText }}</blockquote>
+      </section>
+
+      <!-- ── 摘要 ──
+           两种形态都要能折叠：有分段时逐段列出，无分段时整段列出。
+           早期实现只在「有分段」时给展开按钮，指南/综述这类无分段摘要
+           会把整屏撑满。 -->
+      <section v-if="evidence.abstract_raw" class="ev-sec">
+        <h4 class="ev-h">
           摘要
-          <span class="ev-section-note">doc-meta · abstract_cn</span>
-          <button v-if="hasSections" class="ev-toggle" @click="toggleAbstract">
+          <button class="ev-toggle" @click="toggleAbstract">
             {{ abstractOpen ? '收起' : '展开' }}
           </button>
         </h4>
 
-        <div v-if="hasSections" class="ev-abstract" :class="{ 'ev-clamped': !abstractOpen }">
-          <p v-for="s in otherSections" :key="s.key" class="mb-2 last:mb-0">
+        <div
+          v-if="hasSections"
+          class="ev-abstract"
+          :class="{ 'is-clamped': !abstractOpen }"
+        >
+          <p v-for="s in otherSections" :key="s.key" class="ev-para">
             <span class="ev-abstract-key">{{ s.key }}</span>{{ s.text }}
           </p>
         </div>
-        <p v-else class="ev-abstract">{{ evidence.abstract_raw }}</p>
-      </section>
-
-      <!-- ── 连续上下文 ── -->
-      <section v-if="passage" class="mt-4">
-        <h4 class="ev-section-title">
-          正文上下文
-          <span class="ev-section-note">上文 + 命中块 + 下文</span>
-          <button
-            v-if="passage.has_prev || passage.has_next"
-            class="ev-toggle"
-            @click="toggleOnlyHit"
-          >
-            {{ passageOnlyHit ? '显示前后文' : '只看命中' }}
-          </button>
-        </h4>
-
-        <div class="ev-passage" :class="{ 'only-hit': passageOnlyHit }">
-          <!-- 上文 -->
-          <template v-if="passage.has_prev">
-            <div class="ev-passage-mark is-nb">
-              <span class="ev-passage-lbl">上文</span>{{ passage.prev_heading }}
-            </div>
-            <p class="ev-passage-nb is-top">……{{ passage.prev_text }}</p>
-          </template>
-
-          <!-- 命中 -->
-          <div class="ev-passage-mark">
-            <span class="ev-passage-lbl">命中</span>{{ passage.hit_heading }}
-          </div>
-          <div class="ev-passage-hit-group">
-            <p v-for="(para, i) in passage.hit_paragraphs" :key="i" class="ev-passage-hit-line">
-              <span class="ev-passage-hit">{{ para }}</span>
-            </p>
-          </div>
-
-          <!-- 下文 -->
-          <template v-if="passage.has_next">
-            <div class="ev-passage-mark is-nb">
-              <span class="ev-passage-lbl">下文</span>{{ passage.next_heading }}
-            </div>
-            <p class="ev-passage-nb is-bot">{{ passage.next_text }}……</p>
-          </template>
-        </div>
-      </section>
-
-      <!-- 未定位到命中章节时的说明（不阻断阅读） -->
-      <p v-else-if="evidence.message" class="mt-4 text-[11.5px] text-warn">
-        {{ evidence.message }}
-      </p>
-
-      <!-- 标识 -->
-      <section class="mt-4 border-t border-line pt-3">
-        <p class="font-mono text-[10.5px] leading-relaxed text-faint">
-          doc_id={{ evidence.doc_id }}
-          <template v-if="evidence.doi"><br />doi={{ evidence.doi }}</template>
+        <p v-else class="ev-abstract" :class="{ 'is-clamped': !abstractOpen }">
+          {{ evidence.abstract_raw }}
         </p>
       </section>
 
-      <!-- 动作 -->
-      <div class="mt-3 flex flex-wrap gap-2 border-t border-line pt-3">
+      <!-- ── 动作 ── -->
+      <div class="ev-acts">
         <button v-if="pdfAvailable" class="ev-btn" @click="emit('openPdf')">
-          <FileText :size="12" />
-          查看原文 PDF
+          <FileText :size="13" />
+          查看原文
         </button>
-        <button
-          v-if="conclusionText || fallbackSentence"
-          class="ev-btn"
-          @click="copyConclusion"
-        >
-          复制结论
+        <button v-if="copyText" class="ev-btn" @click="doCopy">
+          复制{{ hitParagraphs.length ? '原文' : '结论' }}
         </button>
       </div>
+
+      <!-- DOI 单独放最后：读者要引用时才需要，不参与阅读动线 -->
+      <p v-if="evidence.doi" class="ev-doi">DOI {{ evidence.doi }}</p>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* 全部颜色走 tokens.css 的语义变量（--accent / --border / --text…），
-   不写死色值 —— 暗色模式只改变量、不改这里。 */
-.ev-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 10.5px;
-  font-weight: 500;
-  background: var(--surface);
-  color: var(--muted);
+/* 颜色全部走 tokens.css 的语义变量，暗色模式只改变量、不改这里。 */
+
+/* ── 被引原文 ── */
+.ev-first {
+  margin-bottom: 24px;
 }
-.badge-guide {
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-.badge-meta {
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  opacity: 0.92;
-}
-.badge-study {
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-.badge-review {
-  background: var(--warn-soft);
-  color: var(--warn);
-}
-.badge-ok {
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-/* 虚线框：明确表示「这个字段缺失」，与有值的实心徽章区分开 */
-.badge-weak {
-  background: transparent;
-  border: 1px dashed var(--border-strong);
-  color: var(--faint);
+.ev-hit-group {
+  padding: 12px 15px;
+  border-radius: 10px;
+  /* 浅底 + 左侧 accent 竖线：读者一眼能看出「这一段是被引的」，
+     又不至于像整块蓝板那样把正文糊住（真实截图确认过）。 */
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 10px 10px 0;
+  font-size: 15px;
+  line-height: 1.95;
+  color: var(--text);
 }
 
-.ev-section-title {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin-bottom: 7px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.45px;
-  text-transform: uppercase;
+.ev-more {
+  margin-top: 10px;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--accent-text);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.ev-more:hover {
+  text-decoration: underline;
+}
+/* 折叠按钮在命中块内部时，跟着块的左内边距走 */
+.ev-hit-group .ev-more {
+  margin-top: 12px;
+}
+.ev-rest .ev-para {
+  margin-bottom: 11px;
+}
+.ev-rest {
+  margin-top: 11px;
+}
+
+.ev-ctx {
+  margin-top: 14px;
+  padding-left: 15px;
+  border-left: 1px solid var(--border);
+}
+.ev-ctx-block + .ev-ctx-block {
+  margin-top: 14px;
+}
+.ev-ctx-label {
+  margin-bottom: 5px;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--faint);
 }
-.ev-section-note {
-  font-size: 9.5px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  font-family: var(--font-mono);
+.ev-ctx .ev-para {
+  font-size: 14px;
+  line-height: 1.95;
+  color: var(--muted);
+}
+
+.ev-locate {
+  margin-bottom: 9px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--accent-text);
+}
+
+.ev-note {
+  margin-bottom: 20px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--warn);
+}
+
+/* ── 出处 ── */
+.ev-head.has-first {
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.ev-title {
+  margin-bottom: 7px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.6;
+  letter-spacing: -0.1px;
+  color: var(--text);
+}
+.ev-authors {
+  margin-bottom: 4px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.ev-source {
+  font-size: 12.5px;
+  line-height: 1.7;
   color: var(--faint);
-  opacity: 0.85;
+}
+.ev-year {
+  font-weight: 600;
+  color: var(--muted);
+}
+.ev-type {
+  font-weight: 500;
+}
+.ev-type.is-guide,
+.ev-type.is-meta {
+  color: var(--accent-text);
+}
+.ev-type.is-study {
+  color: var(--ok);
+}
+.ev-type.is-review {
+  color: var(--warn);
+}
+.ev-sample {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ── 小节标题 ──
+ * 不用 uppercase、不用等宽字体、不加数据来源注脚 ——
+ * 那些是内部术语，读者只需要知道「这一段是什么」。
+ */
+.ev-sec {
+  margin-top: 24px;
+}
+.ev-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
 }
 .ev-toggle {
   margin-left: auto;
-  font-size: 10.5px;
+  font-size: 12.5px;
   font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
   color: var(--accent-text);
-  cursor: pointer;
   background: none;
   border: 0;
   padding: 0;
+  cursor: pointer;
 }
 .ev-toggle:hover {
   text-decoration: underline;
 }
 
-/* 结论引用块 */
+/* ── 结论 ── */
 .ev-quote {
-  padding: 10px 12px;
+  padding: 12px 15px;
   border-left: 2px solid var(--accent);
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 10px 10px 0;
   background: var(--bg);
-  font-size: 12.5px;
-  line-height: 1.9;
+  font-size: 15px;
+  line-height: 1.95;
   color: var(--text-2);
-}
-/* 降级态用警示色，视觉上就能看出「这不是原文结论」 */
-.ev-quote-fallback {
-  border-left-color: var(--warn);
-}
-.ev-fallback-note {
-  display: block;
-  margin-top: 7px;
-  padding-top: 7px;
-  border-top: 1px dashed var(--border);
-  font-size: 11px;
-  line-height: 1.7;
-  color: var(--faint);
 }
 
-/* 摘要 */
+/* ── 摘要与正文共用排版：15px / 行高 1.95 ── */
 .ev-abstract {
-  font-size: 12.5px;
-  line-height: 1.9;
+  font-size: 15px;
+  line-height: 1.95;
   color: var(--text-2);
 }
-.ev-clamped {
-  max-height: 5.6em;
+.ev-abstract.is-clamped {
+  max-height: 5.85em; /* 3 行：字号 15 × 行高 1.95 */
   overflow: hidden;
-  mask-image: linear-gradient(0deg, #000 55%, transparent);
-  -webkit-mask-image: linear-gradient(0deg, #000 55%, transparent);
+  mask-image: linear-gradient(0deg, #000 52%, transparent);
+  -webkit-mask-image: linear-gradient(0deg, #000 52%, transparent);
+}
+.ev-para {
+  margin: 0 0 11px;
+}
+.ev-para:last-child {
+  margin-bottom: 0;
 }
 .ev-abstract-key {
   display: inline-block;
-  min-width: 30px;
-  margin-right: 6px;
-  font-size: 11px;
-  font-weight: 700;
+  min-width: 36px;
+  margin-right: 8px;
+  font-weight: 600;
   color: var(--accent-text);
 }
 
-/* ── 连续上下文 ──
- * 关键点：
- *  1. 命中段落用 inline + box-shadow 铺底，box-decoration-break: clone
- *     让换行处底色连续（否则每行一段，看起来像多块）
- *  2. 上下文用 mask 渐隐表示「还有更多」，而不是加省略号再切一刀
- *  3. 只留章节切换点的小圆点标记，不加边框/padding/展开按钮
- */
-.ev-passage {
-  font-size: 13px;
-  line-height: 2.05;
-  letter-spacing: 0.1px;
-  color: var(--text-2);
-}
-.ev-passage p {
-  margin: 0 0 12px;
-}
-.ev-passage p:last-child {
-  margin-bottom: 0;
-}
-
-.ev-passage-mark {
+/* ── 动作与页脚 ── */
+.ev-acts {
   display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 15px 0 8px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  line-height: 1.6;
-  color: var(--accent-text);
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
-.ev-passage-mark::before {
-  content: '';
-  flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--accent);
-}
-.ev-passage-mark.is-nb {
-  color: var(--faint);
-}
-.ev-passage-mark.is-nb::before {
-  background: var(--border-strong);
-}
-.ev-passage-lbl {
-  flex: none;
-  font-family: var(--font-sans);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: var(--faint);
-}
-
-.ev-passage-nb {
-  color: var(--muted);
-  opacity: 0.72;
-}
-.ev-passage-nb.is-top {
-  mask-image: linear-gradient(180deg, transparent 0%, #000 42%);
-  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 42%);
-}
-.ev-passage-nb.is-bot {
-  mask-image: linear-gradient(0deg, transparent 0%, #000 42%);
-  -webkit-mask-image: linear-gradient(0deg, transparent 0%, #000 42%);
-}
-
-/* 命中段落组 = 一个整块底色。
- *
- * 曾经的做法是给每个 `<span>` 加 `box-shadow: 0 0 0 5px` 铺底 + 段间距 6px。
- * 段间距小于 2×5px，上下两段的阴影**互相接上**，整片变成一块蓝板：
- * 高亮反而把正文糊住了（真实截图确认过）。
- *
- * 现在的分工：
- *   - `.ev-passage-hit-group` 负责**一整块连续的底色**（段之间不漏白）
- *   - `.ev-passage-hit` 只负责**行内换行处不断开**（box-decoration-break）
- * 两者叠加才是「一段连续文本 + 淡淡的高亮区域」。
- */
-.ev-passage-hit-group {
-  background: color-mix(in srgb, var(--accent) 11%, transparent);
-  border-radius: 6px;
-  padding: 10px 12px;
-  margin: 0 0 12px;
-}
-.ev-passage-hit-group .ev-passage-hit-line {
-  margin: 0 0 8px;
-}
-.ev-passage-hit-group .ev-passage-hit-line:last-child {
-  margin-bottom: 0;
-}
-.ev-passage-hit {
-  /* 不再用 box-shadow 铺满，只保留换行处不断开 */
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-}
-
-/* 只看命中：隐藏前后文与它们的标记 */
-.ev-passage.only-hit .ev-passage-nb,
-.ev-passage.only-hit .ev-passage-mark.is-nb {
-  display: none;
-}
-
 .ev-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
+  gap: 6px;
+  padding: 6px 14px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 12.5px;
   cursor: pointer;
   transition:
     background-color 0.15s,
@@ -511,5 +562,23 @@ function copyConclusion() {
 .ev-btn:hover {
   background: var(--surface);
   color: var(--text);
+}
+
+.ev-doi {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--faint);
+  word-break: break-all;
+}
+
+/* 滚动条：窄栏里默认样式太粗 */
+.ev-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.ev-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+  border: 2px solid var(--bg);
 }
 </style>

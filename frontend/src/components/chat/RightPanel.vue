@@ -45,9 +45,14 @@ function toggleView() {
 }
 
 // ── 面板宽度：可拖拽 + 记忆 ────────────────────────────────
+//
+// MIN_W 从 380 提到 440、默认 560 → 600：证据卡正文用 15px / 行高 1.95，
+// 380px 宽时一行只放得下约 22 个汉字，读三段摘要就开始频繁跳行。
+// 读者反馈的"拥挤"不是信息太多，是行宽不够 —— 所以放宽面板，
+// 而不是把字号压小去迁就窄栏。
 
-const MIN_W = 380
-const DEFAULT_W = 560
+const MIN_W = 440
+const DEFAULT_W = 600
 const STORAGE_KEY = 'medrag_pdf_panel_width'
 
 function readStored(): number {
@@ -228,6 +233,7 @@ const panelStyle = computed(() => ({
             :evidence="evidence ?? null"
             :loading="evidenceLoading ?? false"
             :pdf-available="!!pdfUrl"
+            :snippet="activeCitation?.snippet ?? ''"
             @open-pdf="emit('open-pdf')"
             @copy="() => {}"
           />

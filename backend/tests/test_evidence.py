@@ -41,8 +41,32 @@ def test_splits_structured_abstract_into_five_sections():
     sections = split_abstract_sections(raw)
 
     assert [s.key for s in sections] == ["背景", "目的", "方法", "结果", "结论"]
-    assert sections[-1].text.startswith("结论 社区H型高血压患者")
+    # 段键单独放在 key 里，正文不能重复带一遍（界面上会变成「结论 结论 …」）
+    assert sections[-1].text.startswith("社区H型高血压患者")
+    assert not sections[-1].text.startswith("结论")
     assert has_conclusion(sections) is True
+
+
+def test_section_text_does_not_repeat_its_key():
+    """真实样本：8537。`结论 基于三级防控…` 曾经原样返回，
+    证据卡上就出现「**结论** 结论 基于三级防控…」的重复。"""
+    raw = (
+        "摘要： 背景 心脑血管疾病是全球致死致残的主要原因。"
+        " 结论 基于三级防控的中医健康管理具有较好管理效能。"
+    )
+    sections = split_abstract_sections(raw)
+
+    assert [s.key for s in sections] == ["背景", "结论"]
+    assert sections[0].text == "心脑血管疾病是全球致死致残的主要原因。"
+    assert sections[1].text == "基于三级防控的中医健康管理具有较好管理效能。"
+
+
+def test_section_key_with_spaces_is_not_left_in_text():
+    raw = "摘要： 结 论 该模式值得推广应用到基层。" + "补充说明" * 3
+    sections = split_abstract_sections(raw)
+
+    assert sections[0].key == "结论"
+    assert sections[0].text.startswith("该模式")
 
 
 def test_splits_when_section_keys_contain_spaces():
