@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { EvidenceResponse } from '@/api/citation'
 import { computed, ref, watch } from 'vue'
-import { FileText, Loader2 } from 'lucide-vue-next'
+import { Loader2 } from 'lucide-vue-next'
 
 /**
  * 证据卡 —— 用户点引用后，右栏先展示「这篇文献说了什么」，
@@ -48,12 +48,17 @@ import { FileText, Loader2 } from 'lucide-vue-next'
  * 没有 `结论` 段就整个不渲染「核心结论」，而不是拿正文首句冒充 ——
  * 正文首句就在下面的「引用原文」里，冒充一次等于同一段话印两遍，
  * 还让读者以为那是作者的结论。
+ *
+ * ## 卡片里不放「查看原文 / 复制原文」
+ *
+ * 面板标题栏右上角已经有「原文」按钮，卡片底部再放一个「查看原文」是
+ * 同一个动作出现两次；「复制原文」当时挂的 `@copy` 在父组件里是
+ * `() => {}` —— 点了没有任何效果，纯粹是骗人的按钮。正文本来就可用
+ * 鼠标选中，需要复制时读者自己会选。所以这两个都不留。
  */
 const props = defineProps<{
   evidence: EvidenceResponse | null
   loading: boolean
-  /** 展示 PDF 的动作由父组件决定（面板里是切换视图，测试里是 spy） */
-  pdfAvailable: boolean
   /**
    * 引用片段本身（`citation.snippet`）。
    *
@@ -63,11 +68,6 @@ const props = defineProps<{
    * 所以用 snippet 圈出开头被引的那几段，其余折进「本节其余」。
    */
   snippet?: string
-}>()
-
-const emit = defineEmits<{
-  openPdf: []
-  copy: [text: string]
 }>()
 
 const abstractOpen = ref(false)
@@ -192,22 +192,12 @@ const nextLabel = computed(() => {
   return name && p.next_heading !== p.hit_heading ? `下文 · ${name}` : '下文'
 })
 
-/** 可复制的文本：优先被引原文，没有原文时退回结论段 */
-const copyText = computed(() => {
-  if (hitParagraphs.value.length) return hitParagraphs.value.join('\n\n')
-  return conclusionText.value
-})
-
 function toggleAbstract() {
   abstractOpen.value = !abstractOpen.value
 }
 
 function toggleContext() {
   contextOpen.value = !contextOpen.value
-}
-
-function doCopy() {
-  if (copyText.value) emit('copy', copyText.value)
 }
 </script>
 
@@ -326,17 +316,6 @@ function doCopy() {
           {{ evidence.abstract_raw }}
         </p>
       </section>
-
-      <!-- ── 动作 ── -->
-      <div class="ev-acts">
-        <button v-if="pdfAvailable" class="ev-btn" @click="emit('openPdf')">
-          <FileText :size="13" />
-          查看原文
-        </button>
-        <button v-if="copyText" class="ev-btn" @click="doCopy">
-          复制{{ hitParagraphs.length ? '原文' : '结论' }}
-        </button>
-      </div>
 
       <!-- DOI 单独放最后：读者要引用时才需要，不参与阅读动线 -->
       <p v-if="evidence.doi" class="ev-doi">DOI {{ evidence.doi }}</p>
@@ -535,37 +514,11 @@ function doCopy() {
   color: var(--accent-text);
 }
 
-/* ── 动作与页脚 ── */
-.ev-acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 24px;
+/* ── 页脚 ── */
+.ev-doi {
+  margin-top: 20px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
-}
-.ev-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--muted);
-  font-size: 12.5px;
-  cursor: pointer;
-  transition:
-    background-color 0.15s,
-    color 0.15s;
-}
-.ev-btn:hover {
-  background: var(--surface);
-  color: var(--text);
-}
-
-.ev-doi {
-  margin-top: 12px;
   font-size: 12px;
   line-height: 1.6;
   color: var(--faint);

@@ -232,10 +232,7 @@ const panelStyle = computed(() => ({
           <EvidenceCard
             :evidence="evidence ?? null"
             :loading="evidenceLoading ?? false"
-            :pdf-available="!!pdfUrl"
             :snippet="activeCitation?.snippet ?? ''"
-            @open-pdf="emit('open-pdf')"
-            @copy="() => {}"
           />
         </div>
 

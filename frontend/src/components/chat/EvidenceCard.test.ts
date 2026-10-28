@@ -55,7 +55,7 @@ function makeEvidence(over: Partial<EvidenceResponse> = {}): EvidenceResponse {
   }
 }
 
-const baseProps = { loading: false, pdfAvailable: true }
+const baseProps = { loading: false }
 
 describe('EvidenceCard · 渲染', () => {
   it('渲染文献的核心字段', () => {
@@ -327,37 +327,28 @@ describe('EvidenceCard · 不向读者暴露实现细节', () => {
   })
 })
 
-describe('EvidenceCard · 交互', () => {
-  it('点「查看原文」抛 openPdf，点「复制原文」抛命中段原文', async () => {
+describe('EvidenceCard · 不重复面板已有的动作', () => {
+  it('卡片里不出现「查看原文」「复制原文」——这两个要么和标题栏重复，要么点了没反应', () => {
     const w = mount(EvidenceCard, { props: { ...baseProps, evidence: makeEvidence() } })
+    const text = w.text()
 
-    const pdfBtn = w.findAll('button').find((b) => b.text().includes('查看原文'))
-    const copyBtn = w.findAll('button').find((b) => b.text().includes('复制原文'))
-    expect(pdfBtn).toBeTruthy()
-    expect(copyBtn).toBeTruthy()
-
-    await pdfBtn!.trigger('click')
-    await copyBtn!.trigger('click')
-
-    expect(w.emitted('openPdf')).toHaveLength(1)
-    expect(w.emitted('copy')?.[0]?.[0] as string).toContain('舒张压低于 M0')
+    expect(text).not.toContain('查看原文')
+    expect(text).not.toContain('复制原文')
+    expect(text).not.toContain('复制结论')
+    // 除折叠/展开外不该有多余按钮
+    const labels = w.findAll('button').map((b) => b.text())
+    expect(labels.every((t) => /展开|收起|显示上下文/.test(t))).toBe(true)
   })
 
-  it('没有原文时复制按钮退回「复制结论」', () => {
+  it('没有原文时也不冒出「复制结论」', () => {
     const ev = makeEvidence({ passage: null })
     const w = mount(EvidenceCard, { props: { ...baseProps, evidence: ev } })
 
-    const copyBtn = w.findAll('button').find((b) => b.text().includes('复制结论'))
-    expect(copyBtn).toBeTruthy()
+    expect(w.text()).not.toContain('复制')
   })
+})
 
-  it('pdf 不可用时不显示「查看原文」', () => {
-    const w = mount(EvidenceCard, {
-      props: { loading: false, pdfAvailable: false, evidence: makeEvidence() },
-    })
-    expect(w.text()).not.toContain('查看原文')
-  })
-
+describe('EvidenceCard · 交互', () => {
   it('摘要默认折叠，点展开后取消 clamp', async () => {
     const w = mount(EvidenceCard, { props: { ...baseProps, evidence: makeEvidence() } })
 
